@@ -1,0 +1,58 @@
+name: Test SSH Connection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  test-ssh:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        
+        # Check key
+        echo "Key size: $(wc -c < ~/.ssh/id_ed25519) bytes"
+        
+    - name: Test SSH Connection
+      run: |
+        echo "Testing basic SSH..."
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "echo 'SSH works!'; uname -a"
+    
+    - name: Test File Transfer
+      run: |
+        echo "Testing file transfer..."
+        
+        # Create test file
+        echo "Test content from GitHub Actions" > test.txt
+        
+        # Try different methods
+        echo "Method 1: Using cat through SSH..."
+        cat test.txt | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "cat > /tmp/test1.txt && echo 'Method 1 success' && cat /tmp/test1.txt"
+        
+        echo "Method 2: Using scp..."
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            test.txt root@95.217.238.72:/tmp/test2.txt && echo "Method 2 success"
+        
+        echo "Method 3: Using tar..."
+        tar czf - test.txt | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "cd /tmp && tar xzf - && echo 'Method 3 success' && cat test.txt"
+    
+    - name: Check Results
+      run: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "ls -la /tmp/test*.txt"
