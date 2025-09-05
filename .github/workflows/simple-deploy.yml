@@ -168,31 +168,18 @@ jobs:
         name: benchmark-${{ github.sha }}
         path: benchmark-results.json
     
-    - name: Update GitHub Pages
+    - name: Prepare GitHub Pages content
       run: |
-        # Clone gh-pages branch
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
+        echo "📄 Preparing GitHub Pages content..."
         
-        # Try to clone gh-pages, create if doesn't exist
-        git clone -b gh-pages https://github.com/${{ github.repository }}.git gh-pages 2>/dev/null || {
-          mkdir gh-pages
-          cd gh-pages
-          git init
-          git checkout -b gh-pages
-          cd ..
-        }
-        
-        # Ensure reports directory exists
         mkdir -p gh-pages/reports/${{ github.sha }}
         
         # Copy benchmark results
         cp benchmark-results.json gh-pages/reports/${{ github.sha }}/
         
-        # Update index.json
-        cd gh-pages/reports
-        if [ ! -f index.json ]; then
-          echo '{"reports":[]}' > index.json
+        # Create or update index.json
+        if [ ! -f gh-pages/reports/index.json ]; then
+          echo '{"reports":[]}' > gh-pages/reports/index.json
         fi
         
         # Add new report to index using Python
@@ -201,12 +188,19 @@ jobs:
         import os
         
         # Load benchmark results
-        with open('../../benchmark-results.json', 'r') as f:
+        with open('benchmark-results.json', 'r') as f:
             results = json.load(f)
         
-        # Load existing index
-        with open('index.json', 'r') as f:
-            index = json.load(f)
+        # Create index path if needed
+        os.makedirs('gh-pages/reports', exist_ok=True)
+        
+        # Load or create index
+        index_path = 'gh-pages/reports/index.json'
+        if os.path.exists(index_path):
+            with open(index_path, 'r') as f:
+                index = json.load(f)
+        else:
+            index = {"reports": []}
         
         # Add new entry
         new_entry = {
@@ -226,19 +220,24 @@ jobs:
         index['reports'] = index['reports'][:50]
         
         # Save updated index
-        with open('index.json', 'w') as f:
+        with open(index_path, 'w') as f:
             json.dump(index, f, indent=2)
-        EOF
         
-        cd ../..
+        print(f"✅ Added benchmark for commit ${{ github.sha }}")
+        print(f"   Total reports: {len(index['reports'])}")
+        EOF
         
         # Copy dashboard files if they exist
         if [ -d docs ]; then
           cp -r docs/* gh-pages/ 2>/dev/null || true
         fi
         
-        # Commit and push to gh-pages
-        cd gh-pages
-        git add .
-        git commit -m "📊 Update benchmark for ${{ github.sha }}" || echo "No changes to commit"
-        git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages --force
+        echo "✅ GitHub Pages content prepared"
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./gh-pages
+        keep_files: true
+        commit_message: "📊 Update benchmark for ${{ github.sha }}"
