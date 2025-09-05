@@ -55,6 +55,26 @@ jobs:
         fi
         ls -la relay-server-arm64
     
+    - name: Test SCP immediately after build
+      run: |
+        echo "Testing SCP with small file first..."
+        echo "test" > test.txt
+        
+        mkdir -p ~/.ssh
+        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        
+        # Test with small file
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i ~/.ssh/id_ed25519 \
+          test.txt root@95.217.238.72:/tmp/test.txt && echo "✅ Small file upload works"
+        
+        # Test with the binary
+        echo "Now testing with the actual binary..."
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i ~/.ssh/id_ed25519 \
+          relay-server-arm64 root@95.217.238.72:/tmp/relay-test.bin && echo "✅ Binary upload works!" || echo "❌ Binary upload failed"
+    
     - name: Check if deployment is possible
       id: can_deploy
       run: |
