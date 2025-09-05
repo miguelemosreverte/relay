@@ -46,6 +46,10 @@ jobs:
     - name: Run benchmark
       run: |
         echo "📊 Running performance benchmark..."
+        
+        # First, verify server is reachable
+        curl -s https://95.217.238.72.nip.io/health || echo "Warning: Server may not be ready"
+        
         cat > benchmark.js << 'EOF'
         const WebSocket = require('ws');
         const fs = require('fs');
@@ -73,6 +77,7 @@ jobs:
             let latencies = [];
             
             try {
+                console.log('Connecting to WebSocket server...');
                 const ws1 = new WebSocket('wss://95.217.238.72.nip.io/ws/bench1');
                 const ws2 = new WebSocket('wss://95.217.238.72.nip.io/ws/bench2');
                 
@@ -80,20 +85,37 @@ jobs:
                     let ws1Open = false;
                     let ws2Open = false;
                     
+                    // Add connection timeout
+                    const connectionTimeout = setTimeout(() => {
+                        reject(new Error('Connection timeout after 30 seconds'));
+                    }, 30000);
+                    
                     ws1.on('open', () => {
                         console.log('Client 1 connected');
                         ws1Open = true;
-                        if (ws2Open) startTest();
+                        if (ws2Open) {
+                            clearTimeout(connectionTimeout);
+                            startTest();
+                        }
                     });
                     
                     ws2.on('open', () => {
                         console.log('Client 2 connected');
                         ws2Open = true;
-                        if (ws1Open) startTest();
+                        if (ws1Open) {
+                            clearTimeout(connectionTimeout);
+                            startTest();
+                        }
                     });
                     
-                    ws1.on('error', reject);
-                    ws2.on('error', reject);
+                    ws1.on('error', (err) => {
+                        clearTimeout(connectionTimeout);
+                        reject(err);
+                    });
+                    ws2.on('error', (err) => {
+                        clearTimeout(connectionTimeout);
+                        reject(err);
+                    });
                     
                     function startTest() {
                         const interval = setInterval(() => {
