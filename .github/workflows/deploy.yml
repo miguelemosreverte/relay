@@ -227,21 +227,119 @@ jobs:
           exit 1
         fi
     
+    # ============ TESTING ============
+    - name: Run deployment tests
+      id: test
+      run: |
+        echo "🧪 Running deployment tests..."
+        
+        # Install Node.js if needed for tests
+        if ! command -v node &> /dev/null; then
+          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+        fi
+        
+        # Install test dependencies
+        cd ${{ github.workspace }}
+        npm install ws --no-save
+        
+        # Run the test suite
+        node test/deployment-test.js ${{ env.DOMAIN }} || TEST_RESULT=$?
+        
+        # Upload test report as artifact
+        if [ -f deployment-test-report.md ]; then
+          echo "📊 Test report generated"
+          cat deployment-test-report.md >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Store test result
+        if [ "${TEST_RESULT:-0}" -eq 0 ]; then
+          echo "✅ All deployment tests passed!"
+          echo "TEST_STATUS=passed" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Some tests failed, but deployment is complete"
+          echo "TEST_STATUS=failed" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Performance test
+      run: |
+        echo "⚡ Running 10-second performance test..."
+        
+        # Simple performance test using curl
+        echo "### Performance Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Test latency
+        LATENCIES=""
+        for i in {1..10}; do
+          START=$(date +%s%N)
+          curl -s https://${{ env.DOMAIN }}/health > /dev/null
+          END=$(date +%s%N)
+          LATENCY=$((($END - $START) / 1000000))
+          LATENCIES="$LATENCIES $LATENCY"
+        done
+        
+        # Calculate average
+        AVG_LATENCY=$(echo $LATENCIES | awk '{sum=0; for(i=1;i<=NF;i++)sum+=$i; print sum/NF}')
+        
+        echo "- **Average Latency:** ${AVG_LATENCY}ms" >> $GITHUB_STEP_SUMMARY
+        
+        # Test WebSocket connection stability
+        echo "- **WebSocket:** Testing connection stability..." >> $GITHUB_STEP_SUMMARY
+        
+        # Create a simple WebSocket test
+        cat > /tmp/ws-test.js << 'EOF'
+        const WebSocket = require('ws');
+        const ws = new WebSocket(`wss://${process.argv[2]}/ws/perf-test`);
+        let received = 0;
+        
+        ws.on('open', () => {
+          console.log('Connected');
+          // Send 100 messages
+          for(let i = 0; i < 100; i++) {
+            ws.send(JSON.stringify({test: i, data: 'x'.repeat(1000)}));
+          }
+          setTimeout(() => {
+            ws.close();
+            console.log(`Sent 100 messages successfully`);
+            process.exit(0);
+          }, 5000);
+        });
+        
+        ws.on('error', (e) => {
+          console.error('WebSocket error:', e.message);
+          process.exit(1);
+        });
+        EOF
+        
+        if node /tmp/ws-test.js ${{ env.DOMAIN }}; then
+          echo "  ✅ WebSocket stability test passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "  ⚠️ WebSocket stability test had issues" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+    
     - name: Summary
       run: |
-        echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        echo "## 🎉 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Deployment Info" >> $GITHUB_STEP_SUMMARY
         echo "- **Mode:** ${{ steps.check.outputs.MODE == 'full' && 'Full Setup' || 'Quick Update' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit:** \`${{ steps.deploy_info.outputs.SHORT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Actor:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Time:** ${{ env.BUILD_TIME }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Status:** ${{ steps.test.outputs.TEST_STATUS == 'passed' && '✅ Passed' || '⚠️ Some tests failed' }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
         echo "- **WebSocket:** \`wss://${{ env.DOMAIN }}/ws/{username}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Health:** https://${{ env.DOMAIN }}/health" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Quick Test" >> $GITHUB_STEP_SUMMARY
+        echo "### Quick Test Commands" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "# Check health" >> $GITHUB_STEP_SUMMARY
         echo "curl https://${{ env.DOMAIN }}/health | jq '.deployment'" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Test WebSocket" >> $GITHUB_STEP_SUMMARY
+        echo "wscat -c wss://${{ env.DOMAIN }}/ws/test-user" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
