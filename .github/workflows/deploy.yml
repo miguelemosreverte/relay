@@ -15,11 +15,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-    
     - name: Get deployment info
       id: deploy_info
       run: |
@@ -32,48 +27,7 @@ jobs:
         # Short commit hash for display
         echo "SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
     
-    - name: Setup Go dependencies
-      run: |
-        go mod download
-        go mod verify
     
-    - name: Build with deployment info
-      run: |
-        GOOS=linux GOARCH=arm64 \
-        go build \
-          -ldflags "-X main.BuildCommit=${{ github.sha }} -X main.BuildTime=${{ env.BUILD_TIME }} -X main.BuildActor=${{ github.actor }}" \
-          -o relay-server-arm64 \
-          relay-server.go
-        
-        chmod +x relay-server-arm64
-        echo "📦 Binary built: $(du -h relay-server-arm64 | cut -f1)"
-        
-        # Verify binary exists
-        if [ ! -f relay-server-arm64 ]; then
-          echo "❌ Build failed - binary not found!"
-          exit 1
-        fi
-        ls -la relay-server-arm64
-    
-    - name: Test SCP immediately after build
-      run: |
-        echo "Testing SCP with small file first..."
-        echo "test" > test.txt
-        
-        mkdir -p ~/.ssh
-        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        
-        # Test with small file
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          -i ~/.ssh/id_ed25519 \
-          test.txt root@95.217.238.72:/tmp/test.txt && echo "✅ Small file upload works"
-        
-        # Test with the binary
-        echo "Now testing with the actual binary..."
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          -i ~/.ssh/id_ed25519 \
-          relay-server-arm64 root@95.217.238.72:/tmp/relay-test.bin && echo "✅ Binary upload works!" || echo "❌ Binary upload failed"
     
     - name: Check if deployment is possible
       id: can_deploy
@@ -222,77 +176,58 @@ jobs:
         
         echo "✅ Caddy configured with automatic SSL"
     
-    # ============ DEPLOY BINARY (Both modes) ============
-    - name: Deploy binary
+    # ============ DEPLOY USING GIT PULL ============
+    - name: Deploy via git pull and build
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "📤 Starting deployment..."
-        
-        # Verify binary exists locally
-        if [ ! -f "relay-server-arm64" ]; then
-          echo "❌ Binary not found!"
-          ls -la
-          exit 1
-        fi
-        
-        echo "✅ Binary found: $(du -h relay-server-arm64 | cut -f1)"
-        
-        # Create deployment environment file
-        cat > /tmp/relay.env << EOF
-        BUILD_COMMIT=${{ github.sha }}
-        BUILD_TIME=${{ env.BUILD_TIME }}
-        BUILD_ACTOR=${{ github.actor }}
-        BUILD_RUN_ID=${{ github.run_id }}
-        BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
-        EOF
-        
-        # Ensure target directory exists on server
-        echo "Creating target directory..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "mkdir -p /root/relay"
-        
-        # Upload binary (using same command that works in test)
-        echo "Uploading binary..."
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          -i ~/.ssh/id_ed25519 \
-          relay-server-arm64 root@95.217.238.72:/root/relay/relay-server-arm64.new
-        
-        echo "✅ Binary uploaded"
-        
-        # Upload env file using ssh
-        echo "Uploading environment file..."
-        cat /tmp/relay.env | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "cat > /root/relay/relay.env" || {
-            echo "❌ Failed to upload env file"
-            exit 1
-        }
-        echo "✅ Environment file uploaded"
-        
-        echo "🔄 Deploying..."
+        echo "📤 Deploying latest code to server..."
         
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           root@95.217.238.72 "
-          cd /root/relay
+          echo '🔄 Updating code from GitHub...'
           
-          # Backup current binary if exists
-          if [ -f relay-server-arm64 ]; then
-            cp relay-server-arm64 relay-server-arm64.backup
+          # Ensure repo exists
+          if [ ! -d /root/relay-repo ]; then
+            echo 'Cloning repository...'
+            cd /root
+            git clone https://github.com/miguelemosreverte/relay.git relay-repo
           fi
           
-          # Move new binary
-          mv relay-server-arm64.new relay-server-arm64
-          chmod +x relay-server-arm64
+          cd /root/relay-repo
+          
+          # Pull latest changes
+          git pull origin main
+          echo '✅ Code updated to: '
+          git log --oneline -1
+          
+          # Build the server
+          echo '🔨 Building server...'
+          go build -o relay-server relay-server.go
           
           # Stop old server
-          pkill -f relay-server-arm64 || true
+          echo '🛑 Stopping old server...'
+          pkill -f relay-server || true
+          sleep 2
           
-          # Start with deployment info
-          source /root/relay/relay.env
-          export BUILD_COMMIT BUILD_TIME BUILD_ACTOR BUILD_RUN_ID BUILD_RUN_URL
+          # Set environment variables
+          export BUILD_COMMIT='${{ github.sha }}'
+          export BUILD_TIME='${{ env.BUILD_TIME }}'
+          export BUILD_ACTOR='${{ github.actor }}'
+          export BUILD_RUN_ID='${{ github.run_id }}'
+          export BUILD_RUN_URL='${{ env.BUILD_RUN_URL }}'
           
-          nohup ./relay-server-arm64 > server.log 2>&1 &
+          # Start new server
+          echo '🚀 Starting new server...'
+          nohup ./relay-server > relay.log 2>&1 &
+          echo '✅ Server started with PID: '\$!
           
-          echo '✅ Server deployed!'
+          # Verify it's running
+          sleep 3
+          if curl -f http://localhost:8080/health > /dev/null 2>&1; then
+            echo '✅ Server is healthy and responding!'
+          else
+            echo '⚠️ Server may still be starting...'
+          fi
         "
     
     # ============ VERIFICATION ============
