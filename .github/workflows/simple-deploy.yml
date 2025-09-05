@@ -16,16 +16,14 @@ jobs:
         echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
     
+    - name: Test SSH
+      run: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "echo 'SSH works'"
+    
     - name: Deploy
       run: |
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/id_ed25519 \
-            root@95.217.238.72 "
-          echo 'Deploying...'
-          cd /root/relay-repo
-          git pull
-          go build -o relay-server relay-server.go
-          pkill -f relay-server || true
-          nohup ./relay-server > relay.log 2>&1 &
-          echo 'Deployed!'
-        "
+            root@95.217.238.72 "cd /root/relay-repo && git pull && go build -o relay-server relay-server.go && pkill -f relay-server || true; nohup ./relay-server > relay.log 2>&1 & echo 'Deployed!'"
