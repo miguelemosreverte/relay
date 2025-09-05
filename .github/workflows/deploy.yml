@@ -233,14 +233,17 @@ jobs:
         
         echo "Binary size: $(du -h relay-server-arm64)"
         
-        # Upload binary using tar and ssh (more reliable than scp in CI)
-        echo "Attempting to upload binary using tar/ssh method..."
-        tar czf - relay-server-arm64 | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "tar xzf - -C /root/relay && mv /root/relay/relay-server-arm64 /root/relay/relay-server-arm64.new" || {
+        # Upload binary - first ensure directory exists, then upload
+        echo "Ensuring target directory exists..."
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          root@95.217.238.72 "mkdir -p /root/relay"
+        
+        echo "Uploading binary ($(du -h relay-server-arm64 | cut -f1))..."
+        # Use simple scp since SSH test proved it works
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          relay-server-arm64 \
+          root@95.217.238.72:/root/relay/relay-server-arm64.new || {
             echo "❌ Failed to upload binary with exit code: $?"
-            echo "Debugging: Testing SSH connection again..."
-            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-              root@95.217.238.72 "echo 'SSH still works'; ls -la /root/relay/" || echo "SSH test failed"
             exit 1
         }
         echo "✅ Binary uploaded successfully"
