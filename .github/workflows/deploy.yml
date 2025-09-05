@@ -173,49 +173,47 @@ jobs:
         
         echo "✅ Caddy configured with automatic SSL"
     
-    # ============ DEPLOY USING GIT PULL ============
-    - name: Clone or update repository
+    # ============ DEPLOY USING SCRIPT ============
+    - name: Ensure deploy script exists
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "📂 Ensuring repository exists on server..."
+        echo "📝 Creating deployment script on server..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "test -d /root/relay-repo || git clone https://github.com/miguelemosreverte/relay.git /root/relay-repo"
+          root@95.217.238.72 "cat > /root/deploy.sh << 'SCRIPT'
+#!/bin/bash
+set -e
+echo 'Starting deployment...'
+test -d /root/relay-repo || git clone https://github.com/miguelemosreverte/relay.git /root/relay-repo
+cd /root/relay-repo
+git pull origin main
+echo 'Building server...'
+go build -o relay-server relay-server.go
+echo 'Stopping old server...'
+pkill -f relay-server || true
+echo 'Starting new server...'
+export BUILD_COMMIT=\$1
+export BUILD_TIME=\$2
+export BUILD_ACTOR=\$3
+export BUILD_RUN_ID=\$4
+export BUILD_RUN_URL=\$5
+nohup ./relay-server > /root/relay.log 2>&1 &
+echo 'Deployment complete!'
+SCRIPT
+chmod +x /root/deploy.sh"
     
-    - name: Pull latest code
+    - name: Run deployment
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "📥 Pulling latest code..."
+        echo "🚀 Deploying to server..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "cd /root/relay-repo && git pull origin main"
+          root@95.217.238.72 "/root/deploy.sh '${{ github.sha }}' '${{ env.BUILD_TIME }}' '${{ github.actor }}' '${{ github.run_id }}' '${{ env.BUILD_RUN_URL }}'"
     
-    - name: Build server
+    - name: Verify deployment
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "🔨 Building server..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "cd /root/relay-repo && go build -o relay-server relay-server.go"
-    
-    - name: Stop old server
-      if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'  
-      run: |
-        echo "🛑 Stopping old server..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "pkill -f relay-server || true"
-    
-    - name: Start new server
-      if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
-      run: |
-        echo "🚀 Starting new server..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "cd /root/relay-repo && BUILD_COMMIT='${{ github.sha }}' BUILD_TIME='${{ env.BUILD_TIME }}' BUILD_ACTOR='${{ github.actor }}' BUILD_RUN_ID='${{ github.run_id }}' BUILD_RUN_URL='${{ env.BUILD_RUN_URL }}' nohup ./relay-server > /root/relay.log 2>&1 &"
-    
-    - name: Verify server is running
-      if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
-      run: |
-        echo "✅ Waiting for server to start..."
+        echo "✅ Verifying deployment..."
         sleep 5
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "curl -f http://localhost:8080/health > /dev/null 2>&1 && echo '✅ Server is healthy!' || echo '⚠️ Server may still be starting...'"
+        curl -s https://95.217.238.72.nip.io/health | grep healthy && echo "✅ Server is healthy!"
     
     # ============ VERIFICATION ============
     - name: Verify deployment
