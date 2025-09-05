@@ -80,17 +80,24 @@ jobs:
         fi
         
         # Add new report to index (using Python)
-        python3 << 'EOF'
+        export COMMIT_SHA="${{ github.sha }}"
+        export TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        export ACTOR="${{ github.actor }}"
+        export BRANCH="${{ github.ref_name }}"
+        
+        python3 << EOF
 import json
+import os
+
 with open('pages-content/reports/index.json', 'r') as f:
     data = json.load(f)
     
 metrics = json.load(open('performance-report.json'))['results']['metrics']
 data['reports'].insert(0, {
-    "commit": "${{ github.sha }}",
-    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "actor": "${{ github.actor }}",
-    "branch": "${{ github.ref_name }}",
+    "commit": os.environ.get('COMMIT_SHA', 'unknown'),
+    "timestamp": os.environ.get('TIMESTAMP', 'unknown'),
+    "actor": os.environ.get('ACTOR', 'unknown'),
+    "branch": os.environ.get('BRANCH', 'main'),
     "throughput": metrics['messages_per_second'],
     "latency": 10,
     "bandwidth": metrics['bandwidth_mbps']

@@ -148,31 +148,30 @@ jobs:
         }
         
         function generateMarkdown(results) {
-            return `# Performance Report
-        
-**Generated:** ${results.timestamp}
-
-## Metrics
-- **Throughput:** ${results.metrics.messages_per_second.toFixed(2)} msg/s
-- **Bandwidth:** ${results.metrics.bandwidth_mbps.toFixed(2)} Mbps
-- **Total Messages:** ${results.metrics.total_messages}
-- **Test Duration:** ${results.test_duration_ms}ms
-`;
+            return '# Performance Report\\n' +
+        '\\n' +
+        '**Generated:** ' + results.timestamp + '\\n' +
+        '\\n' +
+        '## Metrics\\n' +
+        '- **Throughput:** ' + results.metrics.messages_per_second.toFixed(2) + ' msg/s\\n' +
+        '- **Bandwidth:** ' + results.metrics.bandwidth_mbps.toFixed(2) + ' Mbps\\n' +
+        '- **Total Messages:** ' + results.metrics.total_messages + '\\n' +
+        '- **Test Duration:** ' + results.test_duration_ms + 'ms\\n';
         }
         
         function generateHTML(results) {
-            return `<!DOCTYPE html>
-<html>
-<head><title>Performance Report</title></head>
-<body>
-<h1>Performance Report</h1>
-<p>Generated: ${results.timestamp}</p>
-<ul>
-<li>Throughput: ${results.metrics.messages_per_second.toFixed(2)} msg/s</li>
-<li>Bandwidth: ${results.metrics.bandwidth_mbps.toFixed(2)} Mbps</li>
-</ul>
-</body>
-</html>`;
+            return '<!DOCTYPE html>\\n' +
+                '<html>\\n' +
+                '<head><title>Performance Report</title></head>\\n' +
+                '<body>\\n' +
+                '<h1>Performance Report</h1>\\n' +
+                '<p>Generated: ' + results.timestamp + '</p>\\n' +
+                '<ul>\\n' +
+                '<li>Throughput: ' + results.metrics.messages_per_second.toFixed(2) + ' msg/s</li>\\n' +
+                '<li>Bandwidth: ' + results.metrics.bandwidth_mbps.toFixed(2) + ' Mbps</li>\\n' +
+                '</ul>\\n' +
+                '</body>\\n' +
+                '</html>';
         }
         
         runBenchmark().catch(console.error);

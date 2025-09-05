@@ -63,8 +63,15 @@ jobs:
       if: steps.can_deploy.outputs.SKIP != 'true'
       run: |
         mkdir -p ~/.ssh
-        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
+        # Properly format the SSH key
+        echo "${{ secrets.HETZNER_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
+        
+        # Test the key format
+        if ! grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_ed25519; then
+          echo "⚠️ SSH key might not be properly formatted"
+          head -1 ~/.ssh/id_ed25519
+        fi
     
     - name: Check server status
       id: check
@@ -164,6 +171,13 @@ jobs:
       run: |
         echo "📤 Uploading binary..."
         
+        # Create relay directory if it doesn't exist
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          root@95.217.238.72 "mkdir -p /root/relay" || {
+            echo "❌ Failed to create directory"
+            exit 1
+          }
+        
         # Upload with deployment info as environment file
         cat > /tmp/relay.env << EOF
         BUILD_COMMIT=${{ github.sha }}
@@ -173,13 +187,21 @@ jobs:
         BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
         EOF
         
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+        # Upload binary with error checking
+        if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           relay-server-arm64 \
-          root@95.217.238.72:/root/relay/relay-server-arm64.new
+          root@95.217.238.72:/root/relay/relay-server-arm64.new; then
+            echo "❌ Failed to upload binary"
+            exit 1
+        fi
         
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+        # Upload env file with error checking
+        if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           /tmp/relay.env \
-          root@95.217.238.72:/root/relay/relay.env
+          root@95.217.238.72:/root/relay/relay.env; then
+            echo "❌ Failed to upload env file"
+            exit 1
+        fi
         
         echo "🔄 Deploying..."
         
