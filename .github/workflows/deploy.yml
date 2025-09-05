@@ -385,6 +385,9 @@ jobs:
         THROUGHPUT=$(cat performance-report.json | jq -r '.results.metrics.messages_per_second // 0')
         LATENCY=$(cat performance-report.json | jq -r '.results.test_duration_ms // 0')
         BANDWIDTH=$(cat performance-report.json | jq -r '.results.metrics.bandwidth_mbps // 0')
+        TOTAL_MESSAGES=$(cat performance-report.json | jq -r '.results.metrics.total_messages // 0')
+        TOTAL_BYTES=$(cat performance-report.json | jq -r '.results.metrics.total_bytes // 0')
+        CONNECTED_USERS=$(cat performance-report.json | jq -r '.results.metrics.connected_users // 0')
         
         # Create or update the reports index
         if [ -f gh-pages/reports/index.json ]; then
@@ -396,6 +399,11 @@ jobs:
              --arg throughput "$THROUGHPUT" \
              --arg latency "$LATENCY" \
              --arg bandwidth "$BANDWIDTH" \
+             --arg totalMessages "$TOTAL_MESSAGES" \
+             --arg totalBytes "$TOTAL_BYTES" \
+             --arg connectedUsers "$CONNECTED_USERS" \
+             --arg runNumber "${{ github.run_number }}" \
+             --arg runId "${{ github.run_id }}" \
              '.reports = [{
                 commit: $commit,
                 timestamp: $timestamp,
@@ -403,7 +411,12 @@ jobs:
                 branch: $branch,
                 throughput: ($throughput | tonumber),
                 latency: ($latency | tonumber),
-                bandwidth: ($bandwidth | tonumber)
+                bandwidth: ($bandwidth | tonumber),
+                totalMessages: ($totalMessages | tonumber),
+                totalBytes: ($totalBytes | tonumber),
+                connectedUsers: ($connectedUsers | tonumber),
+                runNumber: ($runNumber | tonumber),
+                runId: $runId
               }] + .reports | .reports = .reports[0:50]' \
              gh-pages/reports/index.json > temp.json && mv temp.json gh-pages/reports/index.json
         else
@@ -417,7 +430,12 @@ jobs:
             "branch": "${{ github.ref_name }}",
             "throughput": $THROUGHPUT,
             "latency": $LATENCY,
-            "bandwidth": $BANDWIDTH
+            "bandwidth": $BANDWIDTH,
+            "totalMessages": $TOTAL_MESSAGES,
+            "totalBytes": $TOTAL_BYTES,
+            "connectedUsers": $CONNECTED_USERS,
+            "runNumber": ${{ github.run_number }},
+            "runId": "${{ github.run_id }}"
           }]
         }
         EOF

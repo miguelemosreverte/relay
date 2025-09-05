@@ -211,9 +211,25 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         }
         
-        #performanceChart {
-            max-width: 100%;
+        .chart-wrapper {
+            position: relative;
             height: 400px;
+            width: 100%;
+        }
+        
+        #performanceChart {
+            max-height: 400px !important;
+        }
+        
+        .chart-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: #999;
+            font-size: 18px;
+            background: #f9f9f9;
+            border-radius: 10px;
         }
         
         .loading {
@@ -281,7 +297,12 @@
         
         <div class="chart-container">
             <h2>Performance Trends</h2>
-            <canvas id="performanceChart"></canvas>
+            <div class="chart-wrapper">
+                <canvas id="performanceChart" style="display: none;"></canvas>
+                <div id="chartEmpty" class="chart-empty">
+                    📈 Performance data will appear here after the first deployment
+                </div>
+            </div>
         </div>
         
         <div class="reports-section">
@@ -319,14 +340,31 @@
                         data: [],
                         borderColor: '#667eea',
                         backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
                         tension: 0.4
                     }, {
                         label: 'Latency (ms)',
                         data: [],
                         borderColor: '#f59e0b',
                         backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
                         tension: 0.4,
                         yAxisID: 'y1'
+                    }, {
+                        label: 'Bandwidth (Mbps)',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        tension: 0.4,
+                        hidden: true,
+                        yAxisID: 'y2'
                     }]
                 },
                 options: {
@@ -336,7 +374,76 @@
                         mode: 'index',
                         intersect: false,
                     },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    const index = context[0].dataIndex;
+                                    const report = chartReports[index];
+                                    if (report) {
+                                        return [
+                                            `Commit: ${report.commit.substring(0, 7)}`,
+                                            `Date: ${new Date(report.timestamp).toLocaleString()}`,
+                                            `Actor: ${report.actor}`,
+                                            `Branch: ${report.branch}`
+                                        ];
+                                    }
+                                    return context[0].label;
+                                },
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toFixed(2);
+                                    }
+                                    return label;
+                                },
+                                afterLabel: function(context) {
+                                    const index = context.dataIndex;
+                                    const report = chartReports[index];
+                                    if (report && context.datasetIndex === 0) {
+                                        return `Total Messages: ${report.totalMessages || 'N/A'}`;
+                                    }
+                                    return '';
+                                }
+                            },
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: '#667eea',
+                            borderWidth: 1,
+                            titleFont: {
+                                size: 12
+                            },
+                            bodyFont: {
+                                size: 13
+                            },
+                            padding: 10,
+                            displayColors: true
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 15
+                            }
+                        }
+                    },
                     scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Deployment Timeline'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
                         y: {
                             type: 'linear',
                             display: true,
@@ -344,7 +451,8 @@
                             title: {
                                 display: true,
                                 text: 'Throughput (msg/s)'
-                            }
+                            },
+                            beginAtZero: true
                         },
                         y1: {
                             type: 'linear',
@@ -356,12 +464,29 @@
                             },
                             grid: {
                                 drawOnChartArea: false,
-                            }
+                            },
+                            beginAtZero: true
+                        },
+                        y2: {
+                            type: 'linear',
+                            display: false,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Bandwidth (Mbps)'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            beginAtZero: true
                         }
                     }
                 }
             });
         }
+        
+        // Store chart data globally for tooltip access
+        let chartReports = [];
         
         function updateDashboard() {
             // Update stats
@@ -380,12 +505,41 @@
                     document.getElementById('lastUpdate').textContent = date.toLocaleDateString();
                 }
                 
-                // Update chart
-                const chartData = performanceReports.slice(0, 20).reverse();
-                performanceChart.data.labels = chartData.map(r => new Date(r.timestamp).toLocaleDateString());
-                performanceChart.data.datasets[0].data = chartData.map(r => r.throughput || 0);
-                performanceChart.data.datasets[1].data = chartData.map(r => r.latency || 0);
-                performanceChart.update();
+                // Update chart - limit to last 25 reports for readability
+                const maxChartPoints = 25;
+                chartReports = performanceReports.slice(0, maxChartPoints).reverse();
+                
+                // Only show chart if we have data
+                if (chartReports.length > 0) {
+                    document.getElementById('performanceChart').style.display = 'block';
+                    document.getElementById('chartEmpty').style.display = 'none';
+                    
+                    // Create labels with short commit hash and date
+                    performanceChart.data.labels = chartReports.map(r => {
+                        const date = new Date(r.timestamp);
+                        const shortCommit = r.commit ? r.commit.substring(0, 7) : 'unknown';
+                        return `${shortCommit} (${date.toLocaleDateString()})`;
+                    });
+                    
+                    // Update all three datasets
+                    performanceChart.data.datasets[0].data = chartReports.map(r => r.throughput || 0);
+                    performanceChart.data.datasets[1].data = chartReports.map(r => r.latency || 0);
+                    performanceChart.data.datasets[2].data = chartReports.map(r => r.bandwidth || 0);
+                    
+                    // Animate the update
+                    performanceChart.update('active');
+                } else {
+                    document.getElementById('performanceChart').style.display = 'none';
+                    document.getElementById('chartEmpty').style.display = 'flex';
+                }
+            } else {
+                // No data - show empty state
+                document.getElementById('performanceChart').style.display = 'none';
+                document.getElementById('chartEmpty').style.display = 'flex';
+                document.getElementById('totalReports').textContent = '0';
+                document.getElementById('avgThroughput').textContent = '0';
+                document.getElementById('avgLatency').textContent = '0';
+                document.getElementById('lastUpdate').textContent = '--';
             }
         }
         
