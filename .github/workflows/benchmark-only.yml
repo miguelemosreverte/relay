@@ -171,12 +171,18 @@ jobs:
           performance-report.json
         retention-days: 90
     
-    - name: Checkout gh-pages branch
-      uses: actions/checkout@v4
-      with:
-        ref: gh-pages
-        path: gh-pages-existing
-      continue-on-error: true
+    - name: Prepare gh-pages directory
+      run: |
+        # Try to fetch gh-pages branch
+        git fetch origin gh-pages:gh-pages 2>/dev/null || echo "No gh-pages branch yet"
+        
+        # Create directory for existing pages content
+        mkdir -p gh-pages-existing
+        
+        # If gh-pages exists, check it out
+        if git show-ref --quiet refs/heads/gh-pages; then
+          git worktree add gh-pages-existing gh-pages 2>/dev/null || true
+        fi
     
     - name: Prepare GitHub Pages content
       run: |
