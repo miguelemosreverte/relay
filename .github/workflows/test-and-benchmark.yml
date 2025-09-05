@@ -21,9 +21,16 @@ jobs:
     
     - name: Build server
       run: |
-        go mod init relay-server || true
+        # Initialize go module if not exists
+        if [ ! -f go.mod ]; then
+          go mod init relay-server
+        fi
+        
+        # Get dependencies
         go get github.com/gorilla/mux
         go get github.com/gorilla/websocket
+        
+        # Build the server
         go build -o relay-server relay-server.go
     
     - name: Start local server
