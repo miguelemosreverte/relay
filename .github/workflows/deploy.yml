@@ -54,14 +54,8 @@ jobs:
         if [ -z "${{ secrets.HETZNER_SSH_KEY }}" ]; then
           echo "❌ SSH key not configured - skipping deployment"
           echo "SKIP=true" >> $GITHUB_OUTPUT
-        elif [ -z "${{ secrets.HETZNER_HOST }}" ]; then
-          echo "❌ Host not configured - skipping deployment"
-          echo "SKIP=true" >> $GITHUB_OUTPUT
-        elif [ -z "${{ secrets.HETZNER_USERNAME }}" ]; then
-          echo "❌ Username not configured - skipping deployment"
-          echo "SKIP=true" >> $GITHUB_OUTPUT
         else
-          echo "✅ All secrets configured - proceeding with deployment"
+          echo "✅ SSH key configured - proceeding with deployment"
           echo "SKIP=false" >> $GITHUB_OUTPUT
         fi
     
@@ -86,7 +80,7 @@ jobs:
           echo "⚠️ Server not responding, checking SSH..."
           
           # Check if we can SSH
-          if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 -o ConnectTimeout=5 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "echo 'SSH OK'" 2>/dev/null; then
+          if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 -o ConnectTimeout=5 root@95.217.238.72 "echo 'SSH OK'" 2>/dev/null; then
             echo "🔧 SSH works, will do full setup"
             echo "MODE=full" >> $GITHUB_OUTPUT
           else
@@ -101,7 +95,7 @@ jobs:
       run: |
         echo "🚀 Starting FULL deployment..."
         
-        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 root@95.217.238.72 "
           set -e
           
           echo '📦 Installing dependencies...'
@@ -157,10 +151,10 @@ jobs:
         }
         EOF
         
-        scp -i ~/.ssh/id_ed25519 /tmp/Caddyfile ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/etc/caddy/Caddyfile
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 /tmp/Caddyfile root@95.217.238.72:/etc/caddy/Caddyfile
         
         # Reload Caddy
-        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "systemctl reload caddy"
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 root@95.217.238.72 "systemctl reload caddy"
         
         echo "✅ Caddy configured with automatic SSL"
     
@@ -181,16 +175,16 @@ jobs:
         
         scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           relay-server-arm64 \
-          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay-server-arm64.new
+          root@95.217.238.72:/root/relay/relay-server-arm64.new
         
         scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           /tmp/relay.env \
-          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay.env
+          root@95.217.238.72:/root/relay/relay.env
         
         echo "🔄 Deploying..."
         
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          root@95.217.238.72 "
           cd /root/relay
           
           # Backup current binary if exists
@@ -246,7 +240,7 @@ jobs:
           echo "❌ Deployment verification failed! Expected ${{ github.sha }}, got $COMMIT"
           
           # Attempt rollback
-          ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 root@95.217.238.72 "
             cd /root/relay
             if [ -f relay-server-arm64.backup ]; then
               echo '🔄 Rolling back...'
