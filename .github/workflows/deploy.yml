@@ -217,8 +217,17 @@ jobs:
         BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
         EOF
         
+        # Check if binary exists
+        if [ ! -f relay-server-arm64 ]; then
+            echo "❌ Binary file not found!"
+            ls -la
+            exit 1
+        fi
+        
+        echo "Binary size: $(du -h relay-server-arm64)"
+        
         # Upload binary with error checking
-        if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+        if ! scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           relay-server-arm64 \
           root@95.217.238.72:/root/relay/relay-server-arm64.new; then
             echo "❌ Failed to upload binary"
