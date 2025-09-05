@@ -1,0 +1,1 @@
+# Performance Report\n\n**Generated:** 2025-09-05T23:43:33.739Z\n**Commit:** 11b2e2766e09b495ec55253456add19154cdc0e7\n\n## Metrics\n- **Throughput:** 88.87 msg/s\n- **Bandwidth:** 0.76 Mbps\n- **Latency:** 180.80 ms\n- **Total Messages:** 889\n
