@@ -1,14 +1,26 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+)
+
+// Build information - set at compile time or via environment
+var (
+	BuildCommit   = os.Getenv("BUILD_COMMIT")
+	BuildTime     = os.Getenv("BUILD_TIME")
+	BuildActor    = os.Getenv("BUILD_ACTOR")
+	BuildRunID    = os.Getenv("BUILD_RUN_ID")
+	BuildRunURL   = os.Getenv("BUILD_RUN_URL")
+	ServerVersion = "1.0.0"
 )
 
 type Client struct {
@@ -24,11 +36,19 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	mu         sync.RWMutex
+	startTime  time.Time
+	stats      ServerStats
 }
 
 type Message struct {
 	From string `json:"from"`
 	Data []byte `json:"data"`
+}
+
+type ServerStats struct {
+	TotalConnections   uint64
+	TotalMessages      uint64
+	TotalBytesRelayed  uint64
 }
 
 var upgrader = websocket.Upgrader{
@@ -45,6 +65,7 @@ func NewHub() *Hub {
 		broadcast:  make(chan Message, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		startTime:  time.Now(),
 	}
 }
 
@@ -54,6 +75,7 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client.username] = client
+			h.stats.TotalConnections++
 			h.mu.Unlock()
 			log.Printf("User '%s' connected. Total users: %d", client.username, len(h.clients))
 
@@ -67,6 +89,11 @@ func (h *Hub) Run() {
 			log.Printf("User '%s' disconnected. Total users: %d", client.username, len(h.clients))
 
 		case message := <-h.broadcast:
+			h.mu.Lock()
+			h.stats.TotalMessages++
+			h.stats.TotalBytesRelayed += uint64(len(message.Data))
+			h.mu.Unlock()
+			
 			h.mu.RLock()
 			// Send to all clients except the sender
 			for username, client := range h.clients {
@@ -188,19 +215,61 @@ func HandleHealth(hub *Hub) http.HandlerFunc {
 		for username := range hub.clients {
 			users = append(users, username)
 		}
+		clientCount := len(hub.clients)
+		stats := hub.stats
+		uptime := time.Since(hub.startTime)
 		hub.mu.RUnlock()
+
+		// Prepare deployment info
+		deploymentInfo := map[string]interface{}{
+			"commit":    getEnvOrDefault("BUILD_COMMIT", "unknown"),
+			"timestamp": getEnvOrDefault("BUILD_TIME", time.Now().UTC().Format(time.RFC3339)),
+			"actor":     getEnvOrDefault("BUILD_ACTOR", "manual"),
+			"run_id":    getEnvOrDefault("BUILD_RUN_ID", ""),
+			"run_url":   getEnvOrDefault("BUILD_RUN_URL", ""),
+		}
+
+		health := map[string]interface{}{
+			"status":  "healthy",
+			"version": ServerVersion,
+			"deployment": deploymentInfo,
+			"server": map[string]interface{}{
+				"uptime_seconds":      uptime.Seconds(),
+				"start_time":         hub.startTime.UTC().Format(time.RFC3339),
+				"current_time":       time.Now().UTC().Format(time.RFC3339),
+			},
+			"metrics": map[string]interface{}{
+				"connected_users":      clientCount,
+				"users":               users,
+				"total_connections":   stats.TotalConnections,
+				"total_messages":      stats.TotalMessages,
+				"total_bytes_relayed": stats.TotalBytesRelayed,
+				"messages_per_second": float64(stats.TotalMessages) / uptime.Seconds(),
+				"bandwidth_mbps":      float64(stats.TotalBytesRelayed*8) / (uptime.Seconds() * 1000000),
+			},
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write([]byte(`{"status":"healthy","users":["`))
-		w.Write([]byte(strings.Join(users, `","`)))
-		w.Write([]byte(`"],"count":`))
-		w.Write([]byte(string(rune(len(users)+'0'))))
-		w.Write([]byte(`}`))
+		json.NewEncoder(w).Encode(health)
 	}
 }
 
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 func main() {
+	// Log deployment information on startup
+	log.Printf("🚀 WebSocket Relay Server v%s starting", ServerVersion)
+	log.Printf("📦 Deployment: Commit=%s, Actor=%s, Time=%s", 
+		getEnvOrDefault("BUILD_COMMIT", "unknown"),
+		getEnvOrDefault("BUILD_ACTOR", "manual"),
+		getEnvOrDefault("BUILD_TIME", time.Now().UTC().Format(time.RFC3339)))
+	
 	hub := NewHub()
 	go hub.Run()
 
@@ -229,7 +298,7 @@ func main() {
 	})
 
 	port := ":8080"
-	log.Printf("WebSocket Relay Server starting on %s", port)
-	log.Printf("Connect via: ws://localhost%s/ws/{username}", port)
+	log.Printf("📡 Server listening on %s", port)
+	log.Printf("🔗 Connect via: ws://localhost%s/ws/{username}", port)
 	log.Fatal(http.ListenAndServe(port, router))
 }

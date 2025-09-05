@@ -1,9 +1,12 @@
-name: Deploy to Hetzner
+name: Smart Auto-Deploy
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
+env:
+  DOMAIN: ${{ secrets.HETZNER_HOST }}.nip.io
 
 jobs:
   deploy:
@@ -17,10 +20,28 @@ jobs:
       with:
         go-version: '1.21'
     
-    - name: Build for ARM64
+    - name: Get deployment info
+      id: deploy_info
       run: |
-        GOOS=linux GOARCH=arm64 go build -o relay-server-arm64 relay-server.go
+        echo "BUILD_COMMIT=${{ github.sha }}" >> $GITHUB_ENV
+        echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+        echo "BUILD_ACTOR=${{ github.actor }}" >> $GITHUB_ENV
+        echo "BUILD_RUN_ID=${{ github.run_id }}" >> $GITHUB_ENV
+        echo "BUILD_RUN_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_ENV
+        
+        # Short commit hash for display
+        echo "SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+    
+    - name: Build with deployment info
+      run: |
+        GOOS=linux GOARCH=arm64 \
+        go build \
+          -ldflags "-X main.BuildCommit=${{ github.sha }} -X main.BuildTime=${{ env.BUILD_TIME }} -X main.BuildActor=${{ github.actor }}" \
+          -o relay-server-arm64 \
+          relay-server.go
+        
         chmod +x relay-server-arm64
+        echo "📦 Binary built: $(du -h relay-server-arm64 | cut -f1)"
     
     - name: Setup SSH
       run: |
@@ -29,27 +50,198 @@ jobs:
         chmod 600 ~/.ssh/id_ed25519
         ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
     
-    - name: Deploy to server
+    - name: Check server status
+      id: check
       run: |
-        # Create directory on server
-        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "mkdir -p /root/relay"
+        echo "🔍 Checking server status..."
         
-        # Copy files
-        scp -i ~/.ssh/id_ed25519 relay-server-arm64 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
-        scp -i ~/.ssh/id_ed25519 docker-compose.yml ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
-        scp -i ~/.ssh/id_ed25519 Dockerfile.relay ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
-        scp -i ~/.ssh/id_ed25519 Caddyfile.docker ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        # Check if server responds to health endpoint
+        if curl -f -m 5 https://${{ env.DOMAIN }}/health 2>/dev/null; then
+          echo "✅ Server is healthy"
+          echo "MODE=quick" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Server not responding, checking SSH..."
+          
+          # Check if we can SSH
+          if ssh -i ~/.ssh/id_ed25519 -o ConnectTimeout=5 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "echo 'SSH OK'" 2>/dev/null; then
+            echo "🔧 SSH works, will do full setup"
+            echo "MODE=full" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Cannot connect to server"
+            exit 1
+          fi
+        fi
+    
+    # ============ FULL DEPLOYMENT (From Scratch) ============
+    - name: Full deployment - Install dependencies
+      if: steps.check.outputs.MODE == 'full'
+      run: |
+        echo "🚀 Starting FULL deployment..."
         
-        # Stop old server and start new one
         ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
-          cd /root/relay
-          pkill -f relay-server || true
-          nohup ./relay-server-arm64 > server.log 2>&1 &
-          echo 'Relay server deployed and started'
+          set -e
+          
+          echo '📦 Installing dependencies...'
+          
+          # Update system
+          apt-get update -qq
+          
+          # Install Caddy if not present
+          if ! command -v caddy &> /dev/null; then
+            echo '  Installing Caddy...'
+            apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+            apt update -qq
+            apt install caddy -y
+            systemctl enable caddy
+          else
+            echo '  ✓ Caddy already installed'
+          fi
+          
+          # Create directories
+          mkdir -p /root/relay
+          mkdir -p /etc/caddy
         "
     
+    - name: Full deployment - Configure Caddy
+      if: steps.check.outputs.MODE == 'full'
+      run: |
+        # Create Caddyfile
+        cat > /tmp/Caddyfile << 'EOF'
+        ${{ env.DOMAIN }} {
+            @websocket {
+                header Connection *Upgrade*
+                header Upgrade websocket
+            }
+            
+            handle /ws/* {
+                reverse_proxy localhost:8080
+            }
+            
+            handle /health {
+                reverse_proxy localhost:8080
+            }
+            
+            handle {
+                respond "WebSocket Relay Server" 200
+            }
+            
+            # Automatic HTTPS with Let's Encrypt
+            tls {
+                on_demand
+            }
+        }
+        EOF
+        
+        scp -i ~/.ssh/id_ed25519 /tmp/Caddyfile ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/etc/caddy/Caddyfile
+        
+        # Reload Caddy
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "systemctl reload caddy"
+        
+        echo "✅ Caddy configured with automatic SSL"
+    
+    # ============ DEPLOY BINARY (Both modes) ============
+    - name: Deploy binary
+      run: |
+        echo "📤 Uploading binary..."
+        
+        # Upload with deployment info as environment file
+        cat > /tmp/relay.env << EOF
+        BUILD_COMMIT=${{ github.sha }}
+        BUILD_TIME=${{ env.BUILD_TIME }}
+        BUILD_ACTOR=${{ github.actor }}
+        BUILD_RUN_ID=${{ github.run_id }}
+        BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
+        EOF
+        
+        scp -i ~/.ssh/id_ed25519 relay-server-arm64 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay-server-arm64.new
+        scp -i ~/.ssh/id_ed25519 /tmp/relay.env ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay.env
+        
+        echo "🔄 Deploying..."
+        
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          cd /root/relay
+          
+          # Backup current binary if exists
+          if [ -f relay-server-arm64 ]; then
+            cp relay-server-arm64 relay-server-arm64.backup
+          fi
+          
+          # Move new binary
+          mv relay-server-arm64.new relay-server-arm64
+          chmod +x relay-server-arm64
+          
+          # Stop old server
+          pkill -f relay-server-arm64 || true
+          
+          # Start with deployment info
+          source /root/relay/relay.env
+          export BUILD_COMMIT BUILD_TIME BUILD_ACTOR BUILD_RUN_ID BUILD_RUN_URL
+          
+          nohup ./relay-server-arm64 > server.log 2>&1 &
+          
+          echo '✅ Server deployed!'
+        "
+    
+    # ============ VERIFICATION ============
     - name: Verify deployment
       run: |
-        sleep 5
-        curl -f https://${{ secrets.HETZNER_HOST }}.nip.io/health || exit 1
-        echo "Deployment verified successfully"
+        echo "⏳ Waiting for server to start..."
+        
+        # Wait up to 30 seconds for server to be ready
+        for i in {1..30}; do
+          if curl -f -m 2 https://${{ env.DOMAIN }}/health 2>/dev/null; then
+            echo "✅ Server is responding!"
+            break
+          fi
+          echo "  Attempt $i/30..."
+          sleep 1
+        done
+        
+        # Final health check with details
+        echo ""
+        echo "📊 Health Check:"
+        HEALTH=$(curl -s https://${{ env.DOMAIN }}/health | jq '.')
+        echo "$HEALTH"
+        
+        # Verify deployment info
+        COMMIT=$(echo "$HEALTH" | jq -r '.deployment.commit')
+        ACTOR=$(echo "$HEALTH" | jq -r '.deployment.actor')
+        
+        if [ "$COMMIT" = "${{ github.sha }}" ]; then
+          echo "✅ Deployment verified! Commit matches: ${{ steps.deploy_info.outputs.SHORT_SHA }}"
+        else
+          echo "❌ Deployment verification failed! Expected ${{ github.sha }}, got $COMMIT"
+          
+          # Attempt rollback
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+            cd /root/relay
+            if [ -f relay-server-arm64.backup ]; then
+              echo '🔄 Rolling back...'
+              pkill -f relay-server-arm64 || true
+              mv relay-server-arm64.backup relay-server-arm64
+              nohup ./relay-server-arm64 > server.log 2>&1 &
+            fi
+          "
+          exit 1
+        fi
+    
+    - name: Summary
+      run: |
+        echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Info" >> $GITHUB_STEP_SUMMARY
+        echo "- **Mode:** ${{ steps.check.outputs.MODE == 'full' && 'Full Setup' || 'Quick Update' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** \`${{ steps.deploy_info.outputs.SHORT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Actor:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Time:** ${{ env.BUILD_TIME }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
+        echo "- **WebSocket:** \`wss://${{ env.DOMAIN }}/ws/{username}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Health:** https://${{ env.DOMAIN }}/health" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Quick Test" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "curl https://${{ env.DOMAIN }}/health | jq '.deployment'" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
