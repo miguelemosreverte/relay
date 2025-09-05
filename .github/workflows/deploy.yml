@@ -53,9 +53,15 @@ jobs:
       run: |
         if [ -z "${{ secrets.HETZNER_SSH_KEY }}" ]; then
           echo "❌ SSH key not configured - skipping deployment"
+          echo ""
+          echo "📝 To enable automatic deployment:"
+          echo "1. Copy your SSH private key (ed25519)"
+          echo "2. Go to Settings → Secrets → Actions"
+          echo "3. Add secret named HETZNER_SSH_KEY with the key content"
+          echo ""
           echo "SKIP=true" >> $GITHUB_OUTPUT
         else
-          echo "✅ SSH key configured - proceeding with deployment"
+          echo "✅ SSH key secret exists - will attempt deployment"
           echo "SKIP=false" >> $GITHUB_OUTPUT
         fi
     
@@ -64,32 +70,36 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         
-        # Write the SSH key
-        cat > ~/.ssh/id_ed25519 << 'SSHKEY'
-        ${{ secrets.HETZNER_SSH_KEY }}
-        SSHKEY
-        
+        # Write the SSH key (handle both formats)
+        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
         
-        # Validate key format
-        echo "🔑 Checking SSH key format..."
-        if grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_ed25519; then
-          echo "✅ SSH key format looks good"
-        else
-          echo "❌ SSH key format issue detected"
-          echo "First line of key:"
-          head -1 ~/.ssh/id_ed25519 | cut -c1-50
+        # Check if key looks valid
+        KEY_SIZE=$(wc -c < ~/.ssh/id_ed25519)
+        echo "📊 SSH key size: $KEY_SIZE bytes"
+        
+        if [ "$KEY_SIZE" -lt 100 ]; then
+          echo "❌ SSH key seems too small or missing"
+          echo "Please check that HETZNER_SSH_KEY secret contains the full private key"
           exit 1
         fi
         
-        # Test SSH connection
+        # Try to connect with verbose error reporting
         echo "🔌 Testing SSH connection..."
-        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 -o ConnectTimeout=5 \
-          root@95.217.238.72 "echo 'SSH test successful'" 2>&1; then
-          echo "✅ SSH connection successful"
+        if ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+             -o PasswordAuthentication=no -o PubkeyAuthentication=yes \
+             -i ~/.ssh/id_ed25519 -o ConnectTimeout=10 \
+             root@95.217.238.72 "echo 'Connected successfully'" 2>&1 | tee ssh_test.log; then
+          echo "✅ SSH connection successful!"
         else
-          echo "❌ SSH connection failed"
-          echo "Debug: SSH key file size: $(wc -c < ~/.ssh/id_ed25519) bytes"
+          echo "❌ SSH connection failed. Debug info:"
+          echo "Last 20 lines of SSH output:"
+          tail -20 ssh_test.log || true
+          echo ""
+          echo "📝 Troubleshooting tips:"
+          echo "1. Ensure the SSH key is correctly copied to GitHub secrets"
+          echo "2. The key should include the full content from -----BEGIN to -----END"
+          echo "3. Make sure there are no extra spaces or line breaks"
           exit 1
         fi
     
