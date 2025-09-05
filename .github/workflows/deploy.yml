@@ -206,16 +206,18 @@ jobs:
     - name: Deploy binary
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "📤 Uploading binary..."
+        echo "📤 Starting deployment..."
         
-        # Create relay directory if it doesn't exist
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "mkdir -p /root/relay" || {
-            echo "❌ Failed to create directory"
-            exit 1
-          }
+        # Verify binary exists locally
+        if [ ! -f "relay-server-arm64" ]; then
+          echo "❌ Binary not found!"
+          ls -la
+          exit 1
+        fi
         
-        # Upload with deployment info as environment file
+        echo "✅ Binary found: $(du -h relay-server-arm64 | cut -f1)"
+        
+        # Create deployment environment file
         cat > /tmp/relay.env << EOF
         BUILD_COMMIT=${{ github.sha }}
         BUILD_TIME=${{ env.BUILD_TIME }}
@@ -224,43 +226,18 @@ jobs:
         BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
         EOF
         
-        # Check if binary exists
-        if [ ! -f relay-server-arm64 ]; then
-            echo "❌ Binary file not found!"
-            ls -la
-            exit 1
-        fi
-        
-        echo "Binary size: $(du -h relay-server-arm64)"
-        
-        # Upload binary - first ensure directory exists, then upload
-        echo "Ensuring target directory exists..."
+        # Ensure target directory exists on server
+        echo "Creating target directory..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           root@95.217.238.72 "mkdir -p /root/relay"
         
-        echo "Uploading binary ($(du -h relay-server-arm64 | cut -f1))..."
-        echo "Current directory: $(pwd)"
-        echo "Files in current directory:"
-        ls -la | head -10
+        # Upload binary (using same command that works in test)
+        echo "Uploading binary..."
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i ~/.ssh/id_ed25519 \
+          relay-server-arm64 root@95.217.238.72:/root/relay/relay-server-arm64.new
         
-        # Use simple scp since SSH test proved it works  
-        if [ -f "relay-server-arm64" ]; then
-          echo "Binary found, uploading..."
-          # Use exact command from working test
-          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_ed25519 \
-            relay-server-arm64 root@95.217.238.72:/root/relay/relay-server-arm64.new && echo "Upload succeeded" || {
-              echo "❌ SCP failed with exit code: $?"
-              echo "Testing if SSH still works..."
-              ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-                root@95.217.238.72 "echo 'SSH test passed'"
-              exit 1
-            }
-        else
-          echo "❌ Binary file not found in current directory!"
-          exit 1
-        fi
-        echo "✅ Binary uploaded successfully"
+        echo "✅ Binary uploaded"
         
         # Upload env file using ssh
         echo "Uploading environment file..."
