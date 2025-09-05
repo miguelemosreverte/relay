@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOMAIN: ${{ secrets.HETZNER_HOST }}.nip.io
+  DOMAIN: 95.217.238.72.nip.io
 
 jobs:
   deploy:
