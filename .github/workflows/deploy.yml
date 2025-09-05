@@ -227,12 +227,17 @@ jobs:
         echo "Binary size: $(du -h relay-server-arm64)"
         
         # Upload binary with error checking
-        if ! scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+        echo "Attempting to upload binary..."
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
           relay-server-arm64 \
-          root@95.217.238.72:/root/relay/relay-server-arm64.new; then
-            echo "❌ Failed to upload binary"
+          root@95.217.238.72:/root/relay/relay-server-arm64.new 2>&1 || {
+            echo "❌ Failed to upload binary with exit code: $?"
+            echo "Debugging: Testing SSH connection again..."
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+              root@95.217.238.72 "echo 'SSH still works'; ls -la /root/relay/" || echo "SSH test failed"
             exit 1
-        fi
+        }
+        echo "✅ Binary uploaded successfully"
         
         # Upload env file with error checking
         if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
