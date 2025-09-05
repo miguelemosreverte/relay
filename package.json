@@ -1,0 +1,22 @@
+{
+  "name": "websocket-relay-benchmark",
+  "version": "1.0.0",
+  "description": "Benchmark suite for WebSocket relay server",
+  "main": "benchmark.js",
+  "scripts": {
+    "test": "node benchmark.js",
+    "benchmark": "node benchmark.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "sqlite3": "^5.1.6"
+  },
+  "keywords": [
+    "websocket",
+    "relay",
+    "benchmark",
+    "performance"
+  ],
+  "author": "",
+  "license": "MIT"
+}

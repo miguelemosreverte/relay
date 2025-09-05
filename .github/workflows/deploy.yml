@@ -1,0 +1,55 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build for ARM64
+      run: |
+        GOOS=linux GOARCH=arm64 go build -o relay-server-arm64 relay-server.go
+        chmod +x relay-server-arm64
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Deploy to server
+      run: |
+        # Create directory on server
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "mkdir -p /root/relay"
+        
+        # Copy files
+        scp -i ~/.ssh/id_ed25519 relay-server-arm64 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        scp -i ~/.ssh/id_ed25519 docker-compose.yml ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        scp -i ~/.ssh/id_ed25519 Dockerfile.relay ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        scp -i ~/.ssh/id_ed25519 Caddyfile.docker ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        
+        # Stop old server and start new one
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          cd /root/relay
+          pkill -f relay-server || true
+          nohup ./relay-server-arm64 > server.log 2>&1 &
+          echo 'Relay server deployed and started'
+        "
+    
+    - name: Verify deployment
+      run: |
+        sleep 5
+        curl -f https://${{ secrets.HETZNER_HOST }}.nip.io/health || exit 1
+        echo "Deployment verified successfully"

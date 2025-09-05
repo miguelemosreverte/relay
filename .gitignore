@@ -1,0 +1,41 @@
+# Binaries
+relay-server
+relay-server-arm64
+relay-server.exe
+*.exe
+
+# Logs
+*.log
+server.log
+
+# Database
+*.db
+*.sqlite
+
+# Node
+node_modules/
+package-lock.json
+
+# Go
+go.sum
+
+# Test output
+benchmark-report.html
+benchmark-report.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+
+# Environment
+.env
+.env.local

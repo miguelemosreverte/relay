@@ -1,0 +1,145 @@
+name: Full Deployment (From Scratch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Domain for SSL (e.g., relay.example.com or use IP.nip.io)'
+        required: false
+        default: '95.217.238.72.nip.io'
+
+jobs:
+  deploy-full:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build for ARM64
+      run: |
+        GOOS=linux GOARCH=arm64 go build -o relay-server-arm64 relay-server.go
+        chmod +x relay-server-arm64
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Check server status
+      id: check
+      run: |
+        if curl -f -m 5 https://${{ secrets.HETZNER_HOST }}.nip.io/health 2>/dev/null; then
+          echo "SERVER_EXISTS=true" >> $GITHUB_OUTPUT
+        else
+          echo "SERVER_EXISTS=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Install Docker and Caddy (if needed)
+      if: steps.check.outputs.SERVER_EXISTS == 'false'
+      run: |
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          # Update system
+          apt-get update
+          
+          # Install Docker
+          if ! command -v docker &> /dev/null; then
+            curl -fsSL https://get.docker.com | sh
+            systemctl enable docker
+            systemctl start docker
+          fi
+          
+          # Install Docker Compose
+          if ! command -v docker-compose &> /dev/null; then
+            curl -L 'https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-aarch64' -o /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+          fi
+          
+          # Install Caddy
+          if ! command -v caddy &> /dev/null; then
+            apt install -y debian-keyring debian-archive-keyring apt-transport-https
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+            apt update
+            apt install caddy -y
+          fi
+        "
+    
+    - name: Deploy relay server
+      env:
+        DOMAIN: ${{ github.event.inputs.domain || secrets.HETZNER_HOST }}.nip.io
+      run: |
+        # Create directories
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "mkdir -p /root/relay"
+        
+        # Copy files
+        scp -i ~/.ssh/id_ed25519 relay-server-arm64 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        scp -i ~/.ssh/id_ed25519 docker-compose.yml ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        scp -i ~/.ssh/id_ed25519 Dockerfile.relay ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/
+        
+        # Create Caddyfile with proper domain
+        cat > /tmp/Caddyfile << EOF
+        $DOMAIN {
+            @websocket {
+                header Connection *Upgrade*
+                header Upgrade websocket
+            }
+            
+            handle /ws/* {
+                reverse_proxy localhost:8080
+            }
+            
+            handle /health {
+                reverse_proxy localhost:8080
+            }
+            
+            handle {
+                respond "WebSocket Relay Server" 200
+            }
+        }
+        EOF
+        
+        scp -i ~/.ssh/id_ed25519 /tmp/Caddyfile ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/etc/caddy/Caddyfile
+        
+        # Start services
+        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+          cd /root/relay
+          
+          # Stop any existing relay server
+          pkill -f relay-server || true
+          
+          # Start relay server
+          nohup ./relay-server-arm64 > server.log 2>&1 &
+          
+          # Reload Caddy for SSL
+          systemctl reload caddy
+          
+          echo 'Full deployment complete!'
+        "
+    
+    - name: Verify deployment
+      run: |
+        echo "Waiting for services to start..."
+        sleep 10
+        
+        # Check health endpoint
+        if curl -f https://${{ github.event.inputs.domain || secrets.HETZNER_HOST }}.nip.io/health; then
+          echo "✅ Deployment successful!"
+        else
+          echo "❌ Deployment verification failed"
+          exit 1
+        fi
+    
+    - name: Display connection info
+      run: |
+        echo "🚀 WebSocket Relay Server Deployed!"
+        echo "=================================="
+        echo "WebSocket URL: wss://${{ github.event.inputs.domain || secrets.HETZNER_HOST }}.nip.io/ws/{username}"
+        echo "Health Check: https://${{ github.event.inputs.domain || secrets.HETZNER_HOST }}.nip.io/health"
+        echo "SSL: Automatically configured with Let's Encrypt"
