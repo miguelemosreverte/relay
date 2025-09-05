@@ -56,3 +56,21 @@ jobs:
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/id_ed25519 \
             root@95.217.238.72 "ls -la /tmp/test*.txt"
+    
+    - name: Test Binary Upload
+      run: |
+        echo "Creating a test binary..."
+        echo '#!/bin/bash' > test-binary
+        echo 'echo "Test binary executed"' >> test-binary
+        chmod +x test-binary
+        
+        echo "Size: $(du -h test-binary)"
+        
+        echo "Uploading test binary..."
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            test-binary root@95.217.238.72:/tmp/test-binary && echo "Binary upload success"
+        
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "chmod +x /tmp/test-binary && /tmp/test-binary"
