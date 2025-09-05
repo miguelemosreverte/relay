@@ -65,18 +65,15 @@ jobs:
           exit 1
         fi
         
-        # Try to connect with verbose error reporting
+        # Try to connect
         echo "🔌 Testing SSH connection..."
-        if ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
              -o PasswordAuthentication=no -o PubkeyAuthentication=yes \
              -i ~/.ssh/id_ed25519 -o ConnectTimeout=10 \
-             root@95.217.238.72 "echo 'Connected successfully'" 2>&1 | tee ssh_test.log; then
+             root@95.217.238.72 "echo 'SSH connection successful'"; then
           echo "✅ SSH connection successful!"
         else
-          echo "❌ SSH connection failed. Debug info:"
-          echo "Last 20 lines of SSH output:"
-          tail -20 ssh_test.log || true
-          echo ""
+          echo "❌ SSH connection failed"
           echo "📝 Troubleshooting tips:"
           echo "1. Ensure the SSH key is correctly copied to GitHub secrets"
           echo "2. The key should include the full content from -----BEGIN to -----END"
