@@ -2,6 +2,8 @@
 
 A high-performance, content-agnostic WebSocket relay server that broadcasts messages between connected clients. Perfect for building real-time applications like chat rooms, video conferencing, collaborative tools, and more.
 
+📊 **[View Live Performance Dashboard →](https://miguelemosreverte.github.io/relay/)**
+
 ## Features
 
 - 🚀 **High Performance**: Handles thousands of messages per second

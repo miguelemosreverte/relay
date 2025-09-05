@@ -369,6 +369,73 @@ jobs:
         
         # You can later use this with shields.io or similar service
     
+    - name: Prepare GitHub Pages content
+      run: |
+        echo "📄 Preparing GitHub Pages content..."
+        
+        # Create reports directory structure
+        mkdir -p gh-pages/reports/${{ github.sha }}
+        
+        # Copy performance reports to commit-specific folder
+        cp performance-report.html gh-pages/reports/${{ github.sha }}/
+        cp performance-report.md gh-pages/reports/${{ github.sha }}/
+        cp performance-report.json gh-pages/reports/${{ github.sha }}/
+        
+        # Extract metrics for index
+        THROUGHPUT=$(cat performance-report.json | jq -r '.results.metrics.messages_per_second // 0')
+        LATENCY=$(cat performance-report.json | jq -r '.results.test_duration_ms // 0')
+        BANDWIDTH=$(cat performance-report.json | jq -r '.results.metrics.bandwidth_mbps // 0')
+        
+        # Create or update the reports index
+        if [ -f gh-pages/reports/index.json ]; then
+          # Add new report to existing index
+          jq --arg commit "${{ github.sha }}" \
+             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             --arg actor "${{ github.actor }}" \
+             --arg branch "${{ github.ref_name }}" \
+             --arg throughput "$THROUGHPUT" \
+             --arg latency "$LATENCY" \
+             --arg bandwidth "$BANDWIDTH" \
+             '.reports = [{
+                commit: $commit,
+                timestamp: $timestamp,
+                actor: $actor,
+                branch: $branch,
+                throughput: ($throughput | tonumber),
+                latency: ($latency | tonumber),
+                bandwidth: ($bandwidth | tonumber)
+              }] + .reports | .reports = .reports[0:50]' \
+             gh-pages/reports/index.json > temp.json && mv temp.json gh-pages/reports/index.json
+        else
+          # Create new index
+          cat > gh-pages/reports/index.json << EOF
+        {
+          "reports": [{
+            "commit": "${{ github.sha }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "actor": "${{ github.actor }}",
+            "branch": "${{ github.ref_name }}",
+            "throughput": $THROUGHPUT,
+            "latency": $LATENCY,
+            "bandwidth": $BANDWIDTH
+          }]
+        }
+        EOF
+        fi
+        
+        # Copy dashboard files
+        cp -r docs/* gh-pages/ 2>/dev/null || true
+        
+        echo "✅ GitHub Pages content prepared"
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./gh-pages
+        keep_files: true
+        commit_message: "📊 Update performance reports for ${{ github.sha }}"
+    
     - name: Summary
       run: |
         echo "## 🎉 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
@@ -383,6 +450,7 @@ jobs:
         echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
         echo "- **WebSocket:** \`wss://${{ env.DOMAIN }}/ws/{username}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Health:** https://${{ env.DOMAIN }}/health" >> $GITHUB_STEP_SUMMARY
+        echo "- **Performance Dashboard:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Quick Test Commands" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
