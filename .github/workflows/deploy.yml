@@ -233,11 +233,10 @@ jobs:
         
         echo "Binary size: $(du -h relay-server-arm64)"
         
-        # Upload binary with error checking
-        echo "Attempting to upload binary..."
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          relay-server-arm64 \
-          root@95.217.238.72:/root/relay/relay-server-arm64.new 2>&1 || {
+        # Upload binary using tar and ssh (more reliable than scp in CI)
+        echo "Attempting to upload binary using tar/ssh method..."
+        tar czf - relay-server-arm64 | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          root@95.217.238.72 "tar xzf - -C /root/relay && mv /root/relay/relay-server-arm64 /root/relay/relay-server-arm64.new" || {
             echo "❌ Failed to upload binary with exit code: $?"
             echo "Debugging: Testing SSH connection again..."
             ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
@@ -246,13 +245,14 @@ jobs:
         }
         echo "✅ Binary uploaded successfully"
         
-        # Upload env file with error checking
-        if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          /tmp/relay.env \
-          root@95.217.238.72:/root/relay/relay.env; then
+        # Upload env file using ssh
+        echo "Uploading environment file..."
+        cat /tmp/relay.env | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          root@95.217.238.72 "cat > /root/relay/relay.env" || {
             echo "❌ Failed to upload env file"
             exit 1
-        fi
+        }
+        echo "✅ Environment file uploaded"
         
         echo "🔄 Deploying..."
         
