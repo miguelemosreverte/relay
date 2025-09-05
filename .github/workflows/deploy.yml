@@ -48,15 +48,33 @@ jobs:
         chmod +x relay-server-arm64
         echo "📦 Binary built: $(du -h relay-server-arm64 | cut -f1)"
     
+    - name: Check if deployment is possible
+      id: can_deploy
+      run: |
+        if [ -z "${{ secrets.HETZNER_SSH_KEY }}" ]; then
+          echo "❌ SSH key not configured - skipping deployment"
+          echo "SKIP=true" >> $GITHUB_OUTPUT
+        elif [ -z "${{ secrets.HETZNER_HOST }}" ]; then
+          echo "❌ Host not configured - skipping deployment"
+          echo "SKIP=true" >> $GITHUB_OUTPUT
+        elif [ -z "${{ secrets.HETZNER_USERNAME }}" ]; then
+          echo "❌ Username not configured - skipping deployment"
+          echo "SKIP=true" >> $GITHUB_OUTPUT
+        else
+          echo "✅ All secrets configured - proceeding with deployment"
+          echo "SKIP=false" >> $GITHUB_OUTPUT
+        fi
+    
     - name: Setup SSH
+      if: steps.can_deploy.outputs.SKIP != 'true'
       run: |
         mkdir -p ~/.ssh
         echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
-        ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
     
     - name: Check server status
       id: check
+      if: steps.can_deploy.outputs.SKIP != 'true'
       run: |
         echo "🔍 Checking server status..."
         
@@ -160,12 +178,18 @@ jobs:
         BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
         EOF
         
-        scp -i ~/.ssh/id_ed25519 relay-server-arm64 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay-server-arm64.new
-        scp -i ~/.ssh/id_ed25519 /tmp/relay.env ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay.env
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          relay-server-arm64 \
+          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay-server-arm64.new
+        
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          /tmp/relay.env \
+          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }}:/root/relay/relay.env
         
         echo "🔄 Deploying..."
         
-        ssh -i ~/.ssh/id_ed25519 ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+          ${{ secrets.HETZNER_USERNAME }}@${{ secrets.HETZNER_HOST }} "
           cd /root/relay
           
           # Backup current binary if exists
