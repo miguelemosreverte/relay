@@ -1,0 +1,257 @@
+name: Run Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # Run every 6 hours
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm install ws --no-save
+    
+    - name: Run benchmark against live server
+      run: |
+        cat > benchmark-live.js << 'EOF'
+        const WebSocket = require('ws');
+        const fs = require('fs');
+        
+        async function runBenchmark() {
+            console.log('🚀 Running benchmark against https://95.217.238.72.nip.io');
+            
+            const results = {
+                timestamp: new Date().toISOString(),
+                commit: process.env.GITHUB_SHA || 'unknown',
+                metrics: {
+                    messages_per_second: 0,
+                    bandwidth_mbps: 0,
+                    total_messages: 0,
+                    total_bytes: 0,
+                    latency_ms: 0,
+                    connected_users: 2
+                }
+            };
+            
+            const startTime = Date.now();
+            let messagesSent = 0;
+            let messagesReceived = 0;
+            let bytesTransferred = 0;
+            let latencies = [];
+            
+            try {
+                // Create two WebSocket connections
+                const ws1 = new WebSocket('wss://95.217.238.72.nip.io/ws/bench1');
+                const ws2 = new WebSocket('wss://95.217.238.72.nip.io/ws/bench2');
+                
+                await new Promise((resolve, reject) => {
+                    let ws1Open = false;
+                    let ws2Open = false;
+                    
+                    ws1.on('open', () => {
+                        console.log('Client 1 connected');
+                        ws1Open = true;
+                        if (ws2Open) startTest();
+                    });
+                    
+                    ws2.on('open', () => {
+                        console.log('Client 2 connected');
+                        ws2Open = true;
+                        if (ws1Open) startTest();
+                    });
+                    
+                    ws1.on('error', reject);
+                    ws2.on('error', reject);
+                    
+                    function startTest() {
+                        // Send messages for 10 seconds
+                        const interval = setInterval(() => {
+                            if (Date.now() - startTime > 10000) {
+                                clearInterval(interval);
+                                
+                                // Calculate results
+                                const duration = (Date.now() - startTime) / 1000;
+                                results.metrics.messages_per_second = messagesReceived / duration;
+                                results.metrics.total_messages = messagesReceived;
+                                results.metrics.total_bytes = bytesTransferred;
+                                results.metrics.bandwidth_mbps = (bytesTransferred * 8) / (duration * 1000000);
+                                if (latencies.length > 0) {
+                                    results.metrics.latency_ms = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                                }
+                                
+                                ws1.close();
+                                ws2.close();
+                                resolve();
+                                return;
+                            }
+                            
+                            const sendTime = Date.now();
+                            const msg = JSON.stringify({
+                                id: messagesSent++,
+                                timestamp: sendTime,
+                                data: 'x'.repeat(1000)
+                            });
+                            ws1.send(msg);
+                            bytesTransferred += msg.length;
+                        }, 10);
+                    }
+                    
+                    ws2.on('message', (data) => {
+                        messagesReceived++;
+                        try {
+                            const msg = JSON.parse(data);
+                            if (msg.timestamp) {
+                                latencies.push(Date.now() - msg.timestamp);
+                            }
+                        } catch {}
+                    });
+                });
+                
+            } catch (error) {
+                console.error('Benchmark error:', error.message);
+                results.error = error.message;
+            }
+            
+            console.log('✅ Benchmark complete!');
+            console.log('  Throughput:', results.metrics.messages_per_second.toFixed(2), 'msg/s');
+            console.log('  Bandwidth:', results.metrics.bandwidth_mbps.toFixed(2), 'Mbps');
+            console.log('  Latency:', results.metrics.latency_ms.toFixed(2), 'ms');
+            
+            // Save results
+            fs.writeFileSync('performance-report.json', JSON.stringify({ results }, null, 2));
+            
+            // Create markdown report
+            const markdown = '# Performance Report\\n\\n' +
+                '**Generated:** ' + results.timestamp + '\\n' +
+                '**Commit:** ' + results.commit + '\\n\\n' +
+                '## Metrics\\n' +
+                '- **Throughput:** ' + results.metrics.messages_per_second.toFixed(2) + ' msg/s\\n' +
+                '- **Bandwidth:** ' + results.metrics.bandwidth_mbps.toFixed(2) + ' Mbps\\n' +
+                '- **Latency:** ' + results.metrics.latency_ms.toFixed(2) + ' ms\\n' +
+                '- **Total Messages:** ' + results.metrics.total_messages + '\\n';
+            
+            fs.writeFileSync('performance-report.md', markdown);
+            
+            // Create HTML report
+            const html = '<!DOCTYPE html>\\n<html>\\n<head><title>Performance Report</title></head>\\n' +
+                '<body>\\n<h1>Performance Report</h1>\\n' +
+                '<p>Generated: ' + results.timestamp + '</p>\\n' +
+                '<ul>\\n' +
+                '<li>Throughput: ' + results.metrics.messages_per_second.toFixed(2) + ' msg/s</li>\\n' +
+                '<li>Bandwidth: ' + results.metrics.bandwidth_mbps.toFixed(2) + ' Mbps</li>\\n' +
+                '<li>Latency: ' + results.metrics.latency_ms.toFixed(2) + ' ms</li>\\n' +
+                '</ul>\\n</body>\\n</html>';
+            
+            fs.writeFileSync('performance-report.html', html);
+        }
+        
+        runBenchmark().catch(console.error);
+        EOF
+        
+        GITHUB_SHA=${{ github.sha }} node benchmark-live.js
+    
+    - name: Upload performance artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-report-${{ github.sha }}
+        path: |
+          performance-report.md
+          performance-report.html
+          performance-report.json
+        retention-days: 90
+    
+    - name: Checkout gh-pages branch
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        path: gh-pages-existing
+      continue-on-error: true
+    
+    - name: Prepare GitHub Pages content
+      run: |
+        echo "📄 Preparing GitHub Pages content..."
+        
+        mkdir -p gh-pages/reports
+        
+        # Copy existing reports if gh-pages branch exists
+        if [ -d gh-pages-existing/reports ]; then
+          cp -r gh-pages-existing/reports/* gh-pages/reports/ || true
+        fi
+        
+        # Create reports directory for this commit
+        mkdir -p gh-pages/reports/${{ github.sha }}
+        cp performance-report.* gh-pages/reports/${{ github.sha }}/
+        
+        # Update index
+        if [ -f gh-pages/reports/index.json ]; then
+          cp gh-pages/reports/index.json gh-pages/reports/index.json.bak
+        else
+          echo '{"reports":[]}' > gh-pages/reports/index.json
+        fi
+        
+        # Add new report to index using Python
+        python3 << EOF
+        import json
+        import os
+        from datetime import datetime
+        
+        # Load performance report
+        with open('performance-report.json', 'r') as f:
+            perf_data = json.load(f)
+        
+        # Load existing index
+        with open('gh-pages/reports/index.json', 'r') as f:
+            index_data = json.load(f)
+        
+        # Add new report
+        new_report = {
+            "commit": "${{ github.sha }}",
+            "timestamp": perf_data['results']['timestamp'],
+            "actor": "${{ github.actor }}",
+            "branch": "${{ github.ref_name }}",
+            "throughput": perf_data['results']['metrics']['messages_per_second'],
+            "latency": perf_data['results']['metrics']['latency_ms'],
+            "bandwidth": perf_data['results']['metrics']['bandwidth_mbps'],
+            "totalMessages": perf_data['results']['metrics']['total_messages'],
+            "totalBytes": perf_data['results']['metrics']['total_bytes']
+        }
+        
+        index_data['reports'].insert(0, new_report)
+        index_data['reports'] = index_data['reports'][:50]  # Keep last 50
+        
+        with open('gh-pages/reports/index.json', 'w') as f:
+            json.dump(index_data, f, indent=2)
+        EOF
+        
+        # Copy dashboard files
+        cp -r docs/* gh-pages/ 2>/dev/null || true
+        
+        echo "✅ GitHub Pages content prepared"
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./gh-pages
+        keep_files: true
+        commit_message: "📊 Update performance reports for ${{ github.sha }}"
+    
+    - name: Summary
+      run: |
+        echo "## 📊 Benchmark Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        cat performance-report.md >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Dashboard" >> $GITHUB_STEP_SUMMARY
+        echo "View full dashboard at: https://miguelemosreverte.github.io/relay/" >> $GITHUB_STEP_SUMMARY
