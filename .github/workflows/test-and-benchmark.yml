@@ -1,0 +1,291 @@
+name: Test and Benchmark
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-and-benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build server
+      run: |
+        go mod init relay-server || true
+        go get github.com/gorilla/mux
+        go get github.com/gorilla/websocket
+        go build -o relay-server relay-server.go
+    
+    - name: Start local server
+      run: |
+        # Start server in background
+        ./relay-server &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        
+        # Wait for server to be ready
+        echo "Waiting for server to start..."
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "✅ Server is ready!"
+            break
+          fi
+          echo "  Attempt $i/30..."
+          sleep 1
+        done
+    
+    - name: Run benchmark tests
+      run: |
+        # Install Node.js for tests
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+        
+        # Install dependencies
+        npm install ws --no-save
+        
+        # Create a simple benchmark
+        cat > benchmark.js << 'EOF'
+        const WebSocket = require('ws');
+        const fs = require('fs');
+        
+        async function runBenchmark() {
+            const results = {
+                timestamp: new Date().toISOString(),
+                metrics: {
+                    messages_per_second: 0,
+                    bandwidth_mbps: 0,
+                    total_messages: 0,
+                    total_bytes: 0,
+                    connected_users: 0
+                },
+                test_duration_ms: 0
+            };
+            
+            console.log('🚀 Starting benchmark...');
+            const startTime = Date.now();
+            
+            // Test WebSocket connections
+            const ws1 = new WebSocket('ws://localhost:8080/ws/test1');
+            const ws2 = new WebSocket('ws://localhost:8080/ws/test2');
+            
+            let messagesSent = 0;
+            let messagesReceived = 0;
+            let bytesTransferred = 0;
+            
+            await new Promise((resolve) => {
+                ws1.on('open', () => {
+                    console.log('Client 1 connected');
+                    
+                    // Send messages for 5 seconds
+                    const interval = setInterval(() => {
+                        if (Date.now() - startTime > 5000) {
+                            clearInterval(interval);
+                            
+                            // Calculate results
+                            const duration = (Date.now() - startTime) / 1000;
+                            results.metrics.messages_per_second = messagesReceived / duration;
+                            results.metrics.total_messages = messagesReceived;
+                            results.metrics.total_bytes = bytesTransferred;
+                            results.metrics.bandwidth_mbps = (bytesTransferred * 8) / (duration * 1000000);
+                            results.metrics.connected_users = 2;
+                            results.test_duration_ms = Date.now() - startTime;
+                            
+                            ws1.close();
+                            ws2.close();
+                            resolve();
+                            return;
+                        }
+                        
+                        const msg = JSON.stringify({
+                            id: messagesSent++,
+                            data: 'x'.repeat(1000)
+                        });
+                        ws1.send(msg);
+                        bytesTransferred += msg.length;
+                    }, 10);
+                });
+                
+                ws2.on('message', () => {
+                    messagesReceived++;
+                });
+                
+                ws2.on('open', () => {
+                    console.log('Client 2 connected');
+                });
+            });
+            
+            console.log('✅ Benchmark complete!');
+            console.log(`  Throughput: ${results.metrics.messages_per_second.toFixed(2)} msg/s`);
+            console.log(`  Bandwidth: ${results.metrics.bandwidth_mbps.toFixed(2)} Mbps`);
+            
+            // Save results
+            fs.writeFileSync('performance-report.json', JSON.stringify({
+                results: results,
+                report_markdown: generateMarkdown(results),
+                report_html: generateHTML(results)
+            }, null, 2));
+            
+            return results;
+        }
+        
+        function generateMarkdown(results) {
+            return `# Performance Report
+        
+**Generated:** ${results.timestamp}
+
+## Metrics
+- **Throughput:** ${results.metrics.messages_per_second.toFixed(2)} msg/s
+- **Bandwidth:** ${results.metrics.bandwidth_mbps.toFixed(2)} Mbps
+- **Total Messages:** ${results.metrics.total_messages}
+- **Test Duration:** ${results.test_duration_ms}ms
+`;
+        }
+        
+        function generateHTML(results) {
+            return `<!DOCTYPE html>
+<html>
+<head><title>Performance Report</title></head>
+<body>
+<h1>Performance Report</h1>
+<p>Generated: ${results.timestamp}</p>
+<ul>
+<li>Throughput: ${results.metrics.messages_per_second.toFixed(2)} msg/s</li>
+<li>Bandwidth: ${results.metrics.bandwidth_mbps.toFixed(2)} Mbps</li>
+</ul>
+</body>
+</html>`;
+        }
+        
+        runBenchmark().catch(console.error);
+        EOF
+        
+        node benchmark.js
+        
+        # Generate HTML and Markdown files
+        cat performance-report.json | jq -r '.report_markdown' > performance-report.md
+        cat performance-report.json | jq -r '.report_html' > performance-report.html
+    
+    - name: Stop server
+      if: always()
+      run: |
+        if [ ! -z "$SERVER_PID" ]; then
+          kill $SERVER_PID || true
+        fi
+    
+    - name: Checkout gh-pages branch
+      uses: actions/checkout@v3
+      with:
+        ref: gh-pages
+        path: gh-pages-existing
+      continue-on-error: true
+    
+    - name: Prepare GitHub Pages content
+      run: |
+        echo "📄 Preparing GitHub Pages content..."
+        
+        # Create fresh gh-pages directory
+        mkdir -p gh-pages/reports
+        
+        # Copy existing reports if gh-pages branch exists
+        if [ -d gh-pages-existing/reports ]; then
+          echo "Found existing reports, copying..."
+          cp -r gh-pages-existing/reports/* gh-pages/reports/ || true
+        fi
+        
+        # Create reports directory for this commit
+        mkdir -p gh-pages/reports/${{ github.sha }}
+        
+        # Copy performance reports
+        cp performance-report.html gh-pages/reports/${{ github.sha }}/
+        cp performance-report.md gh-pages/reports/${{ github.sha }}/
+        cp performance-report.json gh-pages/reports/${{ github.sha }}/
+        
+        # Extract metrics
+        THROUGHPUT=$(cat performance-report.json | jq -r '.results.metrics.messages_per_second // 0')
+        LATENCY=$(cat performance-report.json | jq -r '.results.test_duration_ms // 0')
+        BANDWIDTH=$(cat performance-report.json | jq -r '.results.metrics.bandwidth_mbps // 0')
+        TOTAL_MESSAGES=$(cat performance-report.json | jq -r '.results.metrics.total_messages // 0')
+        TOTAL_BYTES=$(cat performance-report.json | jq -r '.results.metrics.total_bytes // 0')
+        
+        # Create or update index
+        if [ -f gh-pages/reports/index.json ]; then
+          jq --arg commit "${{ github.sha }}" \
+             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             --arg actor "${{ github.actor }}" \
+             --arg branch "${{ github.ref_name }}" \
+             --arg throughput "$THROUGHPUT" \
+             --arg latency "$LATENCY" \
+             --arg bandwidth "$BANDWIDTH" \
+             --arg totalMessages "$TOTAL_MESSAGES" \
+             --arg totalBytes "$TOTAL_BYTES" \
+             '.reports = [{
+                commit: $commit,
+                timestamp: $timestamp,
+                actor: $actor,
+                branch: $branch,
+                throughput: ($throughput | tonumber),
+                latency: ($latency | tonumber),
+                bandwidth: ($bandwidth | tonumber),
+                totalMessages: ($totalMessages | tonumber),
+                totalBytes: ($totalBytes | tonumber)
+              }] + .reports | .reports = .reports[0:50]' \
+             gh-pages/reports/index.json > temp.json && mv temp.json gh-pages/reports/index.json
+        else
+          cat > gh-pages/reports/index.json << EOF
+        {
+          "reports": [{
+            "commit": "${{ github.sha }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "actor": "${{ github.actor }}",
+            "branch": "${{ github.ref_name }}",
+            "throughput": $THROUGHPUT,
+            "latency": $LATENCY,
+            "bandwidth": $BANDWIDTH,
+            "totalMessages": $TOTAL_MESSAGES,
+            "totalBytes": $TOTAL_BYTES
+          }]
+        }
+        EOF
+        fi
+        
+        # Copy dashboard files
+        cp -r docs/* gh-pages/ 2>/dev/null || true
+        
+        echo "✅ GitHub Pages content prepared"
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./gh-pages
+        keep_files: true
+        commit_message: "📊 Update performance reports for ${{ github.sha }}"
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report-${{ github.sha }}
+        path: |
+          performance-report.md
+          performance-report.html
+          performance-report.json
+        retention-days: 90
+    
+    - name: Summary
+      run: |
+        echo "## 📊 Benchmark Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        cat performance-report.md >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Dashboard" >> $GITHUB_STEP_SUMMARY
+        echo "View full dashboard at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
