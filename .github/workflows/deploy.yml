@@ -63,14 +63,34 @@ jobs:
       if: steps.can_deploy.outputs.SKIP != 'true'
       run: |
         mkdir -p ~/.ssh
-        # Properly format the SSH key
-        echo "${{ secrets.HETZNER_SSH_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_ed25519
+        
+        # Write the SSH key
+        cat > ~/.ssh/id_ed25519 << 'SSHKEY'
+        ${{ secrets.HETZNER_SSH_KEY }}
+        SSHKEY
+        
         chmod 600 ~/.ssh/id_ed25519
         
-        # Test the key format
-        if ! grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_ed25519; then
-          echo "⚠️ SSH key might not be properly formatted"
-          head -1 ~/.ssh/id_ed25519
+        # Validate key format
+        echo "🔑 Checking SSH key format..."
+        if grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_ed25519; then
+          echo "✅ SSH key format looks good"
+        else
+          echo "❌ SSH key format issue detected"
+          echo "First line of key:"
+          head -1 ~/.ssh/id_ed25519 | cut -c1-50
+          exit 1
+        fi
+        
+        # Test SSH connection
+        echo "🔌 Testing SSH connection..."
+        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 -o ConnectTimeout=5 \
+          root@95.217.238.72 "echo 'SSH test successful'" 2>&1; then
+          echo "✅ SSH connection successful"
+        else
+          echo "❌ SSH connection failed"
+          echo "Debug: SSH key file size: $(wc -c < ~/.ssh/id_ed25519) bytes"
+          exit 1
         fi
     
     - name: Check server status
