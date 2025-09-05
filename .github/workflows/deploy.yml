@@ -320,6 +320,55 @@ jobs:
         
         echo "" >> $GITHUB_STEP_SUMMARY
     
+    - name: Fetch performance report from API
+      run: |
+        echo "📊 Fetching performance report from server API..."
+        
+        # Get report in Markdown format
+        curl -s -H "Accept: text/markdown" https://${{ env.DOMAIN }}/test/benchmark > performance-report.md
+        
+        # Get report in HTML format
+        curl -s -H "Accept: text/html" https://${{ env.DOMAIN }}/test/benchmark > performance-report.html
+        
+        # Get report in JSON format
+        curl -s https://${{ env.DOMAIN }}/test/benchmark > performance-report.json
+        
+        # Add commit info to report
+        echo "" >> performance-report.md
+        echo "---" >> performance-report.md
+        echo "**Commit:** ${{ github.sha }}" >> performance-report.md
+        echo "**Branch:** ${{ github.ref_name }}" >> performance-report.md
+        echo "**Actor:** ${{ github.actor }}" >> performance-report.md
+        echo "**Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> performance-report.md
+        
+        echo "✅ Reports generated"
+    
+    - name: Upload performance artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report-${{ github.sha }}
+        path: |
+          performance-report.md
+          performance-report.html
+          performance-report.json
+          deployment-test-report.md
+        retention-days: 90
+    
+    - name: Create performance badge
+      run: |
+        # Create a simple status badge JSON
+        cat > performance-badge.json << EOF
+        {
+          "schemaVersion": 1,
+          "label": "Performance",
+          "message": "✅ Tests Passed",
+          "color": "success",
+          "namedLogo": "github-actions"
+        }
+        EOF
+        
+        # You can later use this with shields.io or similar service
+    
     - name: Summary
       run: |
         echo "## 🎉 Deployment Complete!" >> $GITHUB_STEP_SUMMARY

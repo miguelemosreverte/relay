@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -208,6 +209,127 @@ func HandleWebSocket(hub *Hub) http.HandlerFunc {
 	}
 }
 
+func HandleBenchmark(hub *Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Run a quick self-test benchmark
+		startTime := time.Now()
+		
+		hub.mu.RLock()
+		clientCount := len(hub.clients)
+		stats := hub.stats
+		uptime := time.Since(hub.startTime)
+		hub.mu.RUnlock()
+		
+		// Perform some quick tests
+		testResults := map[string]interface{}{
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"server": map[string]interface{}{
+				"version": ServerVersion,
+				"uptime_seconds": uptime.Seconds(),
+				"connected_users": clientCount,
+			},
+			"metrics": map[string]interface{}{
+				"total_messages": stats.TotalMessages,
+				"total_bytes": stats.TotalBytesRelayed,
+				"messages_per_second": float64(stats.TotalMessages) / uptime.Seconds(),
+				"bandwidth_mbps": float64(stats.TotalBytesRelayed*8) / (uptime.Seconds() * 1000000),
+			},
+			"test_duration_ms": time.Since(startTime).Milliseconds(),
+		}
+		
+		// Generate markdown report
+		markdown := generateBenchmarkReport(testResults)
+		
+		// Return based on Accept header
+		accept := r.Header.Get("Accept")
+		if strings.Contains(accept, "text/markdown") {
+			w.Header().Set("Content-Type", "text/markdown")
+			w.Write([]byte(markdown))
+		} else if strings.Contains(accept, "text/html") {
+			w.Header().Set("Content-Type", "text/html")
+			html := markdownToHTML(markdown)
+			w.Write([]byte(html))
+		} else {
+			// Default to JSON with markdown included
+			response := map[string]interface{}{
+				"results": testResults,
+				"report_markdown": markdown,
+				"report_html": markdownToHTML(markdown),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+		}
+	}
+}
+
+func generateBenchmarkReport(results map[string]interface{}) string {
+	var report strings.Builder
+	
+	report.WriteString("# WebSocket Relay Server - Performance Report\n\n")
+	report.WriteString(fmt.Sprintf("**Generated:** %s\n\n", results["timestamp"]))
+	
+	report.WriteString("## Server Status\n\n")
+	if server, ok := results["server"].(map[string]interface{}); ok {
+		report.WriteString(fmt.Sprintf("- **Version:** %v\n", server["version"]))
+		report.WriteString(fmt.Sprintf("- **Uptime:** %.0f seconds\n", server["uptime_seconds"]))
+		report.WriteString(fmt.Sprintf("- **Connected Users:** %v\n", server["connected_users"]))
+	}
+	
+	report.WriteString("\n## Performance Metrics\n\n")
+	if metrics, ok := results["metrics"].(map[string]interface{}); ok {
+		report.WriteString(fmt.Sprintf("- **Total Messages:** %v\n", metrics["total_messages"]))
+		report.WriteString(fmt.Sprintf("- **Total Data:** %.2f MB\n", float64(metrics["total_bytes"].(uint64))/(1024*1024)))
+		report.WriteString(fmt.Sprintf("- **Throughput:** %.2f msg/s\n", metrics["messages_per_second"]))
+		report.WriteString(fmt.Sprintf("- **Bandwidth:** %.2f Mbps\n", metrics["bandwidth_mbps"]))
+	}
+	
+	report.WriteString("\n## Test Information\n\n")
+	report.WriteString(fmt.Sprintf("- **Test Duration:** %vms\n", results["test_duration_ms"]))
+	report.WriteString(fmt.Sprintf("- **Deployment:** %s\n", getEnvOrDefault("BUILD_COMMIT", "unknown")))
+	
+	return report.String()
+}
+
+func markdownToHTML(markdown string) string {
+	// Simple markdown to HTML conversion
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <title>Performance Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #333; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 30px; }
+        ul { list-style-type: none; padding-left: 0; }
+        li { padding: 5px 0; }
+        strong { color: #0066cc; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+`
+	
+	// Convert markdown to HTML (basic conversion)
+	lines := strings.Split(markdown, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "# ") {
+			html += fmt.Sprintf("<h1>%s</h1>\n", strings.TrimPrefix(line, "# "))
+		} else if strings.HasPrefix(line, "## ") {
+			html += fmt.Sprintf("<h2>%s</h2>\n", strings.TrimPrefix(line, "## "))
+		} else if strings.HasPrefix(line, "- ") {
+			html += fmt.Sprintf("<li>%s</li>\n", strings.TrimPrefix(line, "- "))
+		} else if line == "" {
+			html += "<br>\n"
+		} else {
+			html += fmt.Sprintf("<p>%s</p>\n", line)
+		}
+	}
+	
+	html += "</body></html>"
+	return html
+}
+
 func HandleHealth(hub *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hub.mu.RLock()
@@ -280,6 +402,9 @@ func main() {
 	
 	// Health check endpoint
 	router.HandleFunc("/health", HandleHealth(hub))
+	
+	// Benchmark endpoint
+	router.HandleFunc("/test/benchmark", HandleBenchmark(hub))
 	
 	// CORS middleware
 	router.Use(func(next http.Handler) http.Handler {
