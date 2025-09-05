@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-09-05T23:48:38.636Z",
+  "commit": "2c4230f7b8c89bed76bcc70322c801d413491074",
+  "metrics": {
+    "messages_per_second": 85.83133493205436,
+    "bandwidth_mbps": 0.7323629096722621,
+    "total_messages": 859,
+    "total_bytes": 916186,
+    "latency_ms": 177.81839348079163,
+    "connected_users": 2
+  }
+}
