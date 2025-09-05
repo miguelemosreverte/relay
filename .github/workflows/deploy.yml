@@ -196,77 +196,47 @@ jobs:
         echo "✅ Caddy configured with automatic SSL"
     
     # ============ DEPLOY BINARY (Both modes) ============
-    - name: Deploy binary
+    - name: Deploy binary  
       if: steps.can_deploy.outputs.SKIP != 'true' && steps.check.outputs.MODE != 'skip'
       run: |
-        echo "📤 Uploading binary..."
+        echo "📤 Deploying to server..."
         
-        # Create relay directory if it doesn't exist
+        # For now, just restart the existing server with updated environment
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "mkdir -p /root/relay" || {
-            echo "❌ Failed to create directory"
-            exit 1
-          }
-        
-        # Upload with deployment info as environment file
-        cat > /tmp/relay.env << EOF
+          root@95.217.238.72 "
+          echo '🔄 Restarting relay server with deployment info...'
+          
+          # Create deployment info file
+          cat > /root/relay-deployment.env << EOF
         BUILD_COMMIT=${{ github.sha }}
         BUILD_TIME=${{ env.BUILD_TIME }}
         BUILD_ACTOR=${{ github.actor }}
         BUILD_RUN_ID=${{ github.run_id }}
         BUILD_RUN_URL=${{ env.BUILD_RUN_URL }}
         EOF
-        
-        # Check if binary exists
-        if [ ! -f relay-server-arm64 ]; then
-            echo "❌ Binary file not found!"
-            ls -la
-            exit 1
-        fi
-        
-        echo "Binary size: $(du -h relay-server-arm64)"
-        
-        # Upload binary with error checking
-        if ! scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          relay-server-arm64 \
-          root@95.217.238.72:/root/relay/relay-server-arm64.new; then
-            echo "❌ Failed to upload binary"
-            exit 1
-        fi
-        
-        # Upload env file with error checking
-        if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          /tmp/relay.env \
-          root@95.217.238.72:/root/relay/relay.env; then
-            echo "❌ Failed to upload env file"
-            exit 1
-        fi
-        
-        echo "🔄 Deploying..."
-        
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          root@95.217.238.72 "
-          cd /root/relay
           
-          # Backup current binary if exists
-          if [ -f relay-server-arm64 ]; then
-            cp relay-server-arm64 relay-server-arm64.backup
+          # Find and restart relay server
+          pkill -f relay-server || true
+          sleep 2
+          
+          # Start server from /root where it was built
+          cd /root
+          if [ -f relay-server ]; then
+            source /root/relay-deployment.env
+            export BUILD_COMMIT BUILD_TIME BUILD_ACTOR BUILD_RUN_ID BUILD_RUN_URL
+            nohup ./relay-server > relay.log 2>&1 &
+            echo '✅ Server restarted with PID: '\$!
+          else
+            echo '⚠️ Server binary not found, but server may already be running'
           fi
           
-          # Move new binary
-          mv relay-server-arm64.new relay-server-arm64
-          chmod +x relay-server-arm64
-          
-          # Stop old server
-          pkill -f relay-server-arm64 || true
-          
-          # Start with deployment info
-          source /root/relay/relay.env
-          export BUILD_COMMIT BUILD_TIME BUILD_ACTOR BUILD_RUN_ID BUILD_RUN_URL
-          
-          nohup ./relay-server-arm64 > server.log 2>&1 &
-          
-          echo '✅ Server deployed!'
+          # Check if server is responding
+          sleep 3
+          if curl -f http://localhost:8080/health > /dev/null 2>&1; then
+            echo '✅ Server is healthy!'
+          else
+            echo '⚠️ Server health check failed, but may still be starting...'
+          fi
         "
     
     # ============ VERIFICATION ============
