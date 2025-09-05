@@ -22,8 +22,24 @@ jobs:
             -i ~/.ssh/id_ed25519 \
             root@95.217.238.72 "echo 'SSH works'"
     
-    - name: Deploy
+    - name: Git Pull
       run: |
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/id_ed25519 \
-            root@95.217.238.72 "cd /root/relay-repo && git pull && go build -o relay-server relay-server.go && pkill -f relay-server || true; nohup ./relay-server > relay.log 2>&1 & echo 'Deployed!'"
+            root@95.217.238.72 "cd /root/relay-repo && git pull"
+    
+    - name: Build
+      run: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "cd /root/relay-repo && go build -o relay-server relay-server.go"
+    
+    - name: Restart Server
+      run: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "cd /root/relay-repo && pkill -f relay-server || true"
+        
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_ed25519 \
+            root@95.217.238.72 "cd /root/relay-repo && nohup ./relay-server > /root/relay.log 2>&1 & echo 'Started!'"
