@@ -369,25 +369,47 @@ jobs:
         
         # You can later use this with shields.io or similar service
     
+    - name: Checkout gh-pages branch
+      uses: actions/checkout@v3
+      with:
+        ref: gh-pages
+        path: gh-pages-existing
+      continue-on-error: true
+    
     - name: Prepare GitHub Pages content
       run: |
         echo "📄 Preparing GitHub Pages content..."
         
-        # Create reports directory structure
+        # Create fresh gh-pages directory
+        mkdir -p gh-pages/reports
+        
+        # Copy existing reports if gh-pages branch exists
+        if [ -d gh-pages-existing/reports ]; then
+          echo "Found existing reports, copying..."
+          cp -r gh-pages-existing/reports/* gh-pages/reports/ || true
+        fi
+        
+        # Create reports directory for this commit
         mkdir -p gh-pages/reports/${{ github.sha }}
         
         # Copy performance reports to commit-specific folder
-        cp performance-report.html gh-pages/reports/${{ github.sha }}/
-        cp performance-report.md gh-pages/reports/${{ github.sha }}/
-        cp performance-report.json gh-pages/reports/${{ github.sha }}/
+        if [ -f performance-report.html ]; then
+          cp performance-report.html gh-pages/reports/${{ github.sha }}/
+        fi
+        if [ -f performance-report.md ]; then
+          cp performance-report.md gh-pages/reports/${{ github.sha }}/
+        fi
+        if [ -f performance-report.json ]; then
+          cp performance-report.json gh-pages/reports/${{ github.sha }}/
+        fi
         
         # Extract metrics for index
-        THROUGHPUT=$(cat performance-report.json | jq -r '.results.metrics.messages_per_second // 0')
-        LATENCY=$(cat performance-report.json | jq -r '.results.test_duration_ms // 0')
-        BANDWIDTH=$(cat performance-report.json | jq -r '.results.metrics.bandwidth_mbps // 0')
-        TOTAL_MESSAGES=$(cat performance-report.json | jq -r '.results.metrics.total_messages // 0')
-        TOTAL_BYTES=$(cat performance-report.json | jq -r '.results.metrics.total_bytes // 0')
-        CONNECTED_USERS=$(cat performance-report.json | jq -r '.results.metrics.connected_users // 0')
+        THROUGHPUT=$(cat performance-report.json | jq -r '.results.metrics.messages_per_second // 0' 2>/dev/null || echo "0")
+        LATENCY=$(cat performance-report.json | jq -r '.results.test_duration_ms // 0' 2>/dev/null || echo "0")
+        BANDWIDTH=$(cat performance-report.json | jq -r '.results.metrics.bandwidth_mbps // 0' 2>/dev/null || echo "0")
+        TOTAL_MESSAGES=$(cat performance-report.json | jq -r '.results.metrics.total_messages // 0' 2>/dev/null || echo "0")
+        TOTAL_BYTES=$(cat performance-report.json | jq -r '.results.metrics.total_bytes // 0' 2>/dev/null || echo "0")
+        CONNECTED_USERS=$(cat performance-report.json | jq -r '.results.metrics.connected_users // 0' 2>/dev/null || echo "0")
         
         # Create or update the reports index
         if [ -f gh-pages/reports/index.json ]; then

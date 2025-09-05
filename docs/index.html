@@ -214,11 +214,14 @@
         .chart-wrapper {
             position: relative;
             height: 400px;
+            max-height: 400px;
             width: 100%;
         }
         
-        #performanceChart {
+        canvas#performanceChart {
             max-height: 400px !important;
+            height: 100% !important;
+            width: 100% !important;
         }
         
         .chart-empty {
@@ -274,6 +277,7 @@
                 <span class="status-badge status-live">LIVE</span>
             </h1>
             <p class="subtitle">Performance Monitoring Dashboard</p>
+            <p id="lastCommitInfo" style="margin-top: 10px; color: #888; font-size: 14px;"></p>
             
             <div class="stats-grid">
                 <div class="stat-card">
@@ -503,6 +507,10 @@
                 if (lastReport) {
                     const date = new Date(lastReport.timestamp);
                     document.getElementById('lastUpdate').textContent = date.toLocaleDateString();
+                    
+                    // Update last commit info in header
+                    const commitInfo = `Last deployment: ${lastReport.commit.substring(0, 7)} by ${lastReport.actor} on ${date.toLocaleString()} (${lastReport.branch} branch)`;
+                    document.getElementById('lastCommitInfo').textContent = commitInfo;
                 }
                 
                 // Update chart - limit to last 25 reports for readability
@@ -620,8 +628,7 @@
         initChart();
         loadReports();
         
-        // Auto-refresh every 5 minutes
-        setInterval(loadReports, 5 * 60 * 1000);
+        // Removed auto-refresh to prevent lag
     </script>
 </body>
 </html>
