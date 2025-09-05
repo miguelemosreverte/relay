@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-09-05T23:42:36.922Z",
+  "commit": "test-local",
+  "metrics": {
+    "messages_per_second": 91.81636726546907,
+    "bandwidth_mbps": 0.7698139720558882,
+    "total_messages": 460,
+    "total_bytes": 482096,
+    "latency_ms": 21.723913043478262,
+    "connected_users": 2
+  }
+}

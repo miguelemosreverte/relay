@@ -237,6 +237,14 @@ jobs:
         fi
         
         echo "✅ GitHub Pages content prepared"
+        
+        # Debug: Show what we're about to deploy
+        echo "📁 Contents of gh-pages directory:"
+        ls -la gh-pages/
+        echo "📊 Contents of reports directory:"
+        ls -la gh-pages/reports/
+        echo "📄 Contents of index.json:"
+        cat gh-pages/reports/index.json | head -20
     
     - name: Deploy to GitHub Pages
       uses: peaceiris/actions-gh-pages@v3
