@@ -239,13 +239,28 @@ jobs:
           root@95.217.238.72 "mkdir -p /root/relay"
         
         echo "Uploading binary ($(du -h relay-server-arm64 | cut -f1))..."
-        # Use simple scp since SSH test proved it works
-        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
-          relay-server-arm64 \
-          root@95.217.238.72:/root/relay/relay-server-arm64.new || {
-            echo "❌ Failed to upload binary with exit code: $?"
+        echo "Current directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la | head -10
+        
+        # Use simple scp since SSH test proved it works  
+        if [ -f "relay-server-arm64" ]; then
+          echo "Binary found, uploading..."
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i ~/.ssh/id_ed25519 \
+            relay-server-arm64 \
+            root@95.217.238.72:/root/relay/relay-server-arm64.new
+          SCP_EXIT=$?
+          if [ $SCP_EXIT -ne 0 ]; then
+            echo "❌ SCP failed with exit code: $SCP_EXIT"
+            echo "Testing if SSH still works..."
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/id_ed25519 \
+              root@95.217.238.72 "echo 'SSH test passed'"
             exit 1
-        }
+          fi
+        else
+          echo "❌ Binary file not found in current directory!"
+          exit 1
+        fi
         echo "✅ Binary uploaded successfully"
         
         # Upload env file using ssh
