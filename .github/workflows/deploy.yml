@@ -47,6 +47,13 @@ jobs:
         
         chmod +x relay-server-arm64
         echo "📦 Binary built: $(du -h relay-server-arm64 | cut -f1)"
+        
+        # Verify binary exists
+        if [ ! -f relay-server-arm64 ]; then
+          echo "❌ Build failed - binary not found!"
+          exit 1
+        fi
+        ls -la relay-server-arm64
     
     - name: Check if deployment is possible
       id: can_deploy
