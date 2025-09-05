@@ -176,15 +176,18 @@ jobs:
       run: |
         echo "📄 Preparing GitHub Pages content..."
         
+        # First, get existing gh-pages content
+        git clone -b gh-pages https://github.com/${{ github.repository }}.git gh-pages-existing || echo "No existing gh-pages"
+        
         mkdir -p gh-pages/reports/${{ github.sha }}
+        
+        # Copy existing reports if they exist
+        if [ -d gh-pages-existing/reports ]; then
+          cp -r gh-pages-existing/reports/* gh-pages/reports/ || true
+        fi
         
         # Copy benchmark results
         cp benchmark-results.json gh-pages/reports/${{ github.sha }}/
-        
-        # Create or update index.json
-        if [ ! -f gh-pages/reports/index.json ]; then
-          echo '{"reports":[]}' > gh-pages/reports/index.json
-        fi
         
         # Add new report to index using Python
         python3 << EOF
