@@ -255,4 +255,4 @@ MIT License - see LICENSE file for details
 
 - Built with [Gorilla WebSocket](https://github.com/gorilla/websocket)
 - Proxy powered by [Caddy](https://caddyserver.com/)
-- Deployment automated with GitHub Actions
+- Deployment automated with GitHub Actions# Triggering workflow
