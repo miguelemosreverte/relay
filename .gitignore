@@ -17,7 +17,7 @@ node_modules/
 package-lock.json
 
 # Go
-go.sum
+# (go.sum should be committed)
 
 # Test output
 benchmark-report.html

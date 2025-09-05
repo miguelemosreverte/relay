@@ -32,6 +32,11 @@ jobs:
         # Short commit hash for display
         echo "SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
     
+    - name: Setup Go dependencies
+      run: |
+        go mod download
+        go mod verify
+    
     - name: Build with deployment info
       run: |
         GOOS=linux GOARCH=arm64 \
