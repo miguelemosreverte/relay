@@ -1,13 +1,13 @@
 {
   "results": {
-    "timestamp": "2025-09-06T00:03:17.783Z",
+    "timestamp": "2025-09-06T00:18:56.545Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
-      "messages_per_second": 91.06357457017194,
-      "bandwidth_mbps": 0.7719696121551379,
-      "total_messages": 911,
-      "total_bytes": 965348,
-      "latency_ms": 126.86937431394072,
+      "messages_per_second": 87.56497401039584,
+      "bandwidth_mbps": 0.7460391843262695,
+      "total_messages": 876,
+      "total_bytes": 932922,
+      "latency_ms": 164.64269406392694,
       "connected_users": 2
     }
   }
