@@ -165,6 +165,11 @@ jobs:
         
         # Run the benchmark
         GITHUB_SHA=${{ github.sha }} node benchmark-live.js
+        
+        # Debug: Check if benchmark results were created
+        echo "📊 Benchmark results:"
+        ls -la benchmark-results.json || echo "ERROR: benchmark-results.json not found!"
+        cat benchmark-results.json || echo "ERROR: Could not read benchmark results!"
     
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
@@ -193,45 +198,57 @@ jobs:
         python3 << EOF
         import json
         import os
+        import sys
         
-        # Load benchmark results
-        with open('benchmark-results.json', 'r') as f:
-            results = json.load(f)
-        
-        # Create index path if needed
-        os.makedirs('gh-pages/reports', exist_ok=True)
-        
-        # Load or create index
-        index_path = 'gh-pages/reports/index.json'
-        if os.path.exists(index_path):
-            with open(index_path, 'r') as f:
-                index = json.load(f)
-        else:
-            index = {"reports": []}
-        
-        # Add new entry
-        new_entry = {
-            "commit": "${{ github.sha }}",
-            "timestamp": results['timestamp'],
-            "actor": "${{ github.actor }}",
-            "branch": "${{ github.ref_name }}",
-            "throughput": results['metrics']['messages_per_second'],
-            "latency": results['metrics']['latency_ms'],
-            "bandwidth": results['metrics']['bandwidth_mbps'],
-            "totalMessages": results['metrics']['total_messages'],
-            "totalBytes": results['metrics']['total_bytes']
-        }
-        
-        # Add to beginning and keep last 50
-        index['reports'].insert(0, new_entry)
-        index['reports'] = index['reports'][:50]
-        
-        # Save updated index
-        with open(index_path, 'w') as f:
-            json.dump(index, f, indent=2)
-        
-        print(f"✅ Added benchmark for commit ${{ github.sha }}")
-        print(f"   Total reports: {len(index['reports'])}")
+        try:
+            # Load benchmark results
+            with open('benchmark-results.json', 'r') as f:
+                results = json.load(f)
+            print(f"Loaded benchmark results: {results.keys()}")
+            
+            # Create index path if needed
+            os.makedirs('gh-pages/reports', exist_ok=True)
+            
+            # Load or create index
+            index_path = 'gh-pages/reports/index.json'
+            if os.path.exists(index_path):
+                with open(index_path, 'r') as f:
+                    index = json.load(f)
+                print(f"Loaded existing index with {len(index.get('reports', []))} reports")
+            else:
+                index = {"reports": []}
+                print("Created new index")
+            
+            # Add new entry
+            new_entry = {
+                "commit": "${{ github.sha }}",
+                "timestamp": results.get('timestamp', 'unknown'),
+                "actor": "${{ github.actor }}",
+                "branch": "${{ github.ref_name }}",
+                "throughput": results.get('metrics', {}).get('messages_per_second', 0),
+                "latency": results.get('metrics', {}).get('latency_ms', 0),
+                "bandwidth": results.get('metrics', {}).get('bandwidth_mbps', 0),
+                "totalMessages": results.get('metrics', {}).get('total_messages', 0),
+                "totalBytes": results.get('metrics', {}).get('total_bytes', 0)
+            }
+            
+            # Add to beginning and keep last 50
+            index['reports'].insert(0, new_entry)
+            index['reports'] = index['reports'][:50]
+            
+            # Save updated index
+            with open(index_path, 'w') as f:
+                json.dump(index, f, indent=2)
+            
+            print(f"✅ Added benchmark for commit ${{ github.sha }}")
+            print(f"   Total reports: {len(index['reports'])}")
+            print(f"   Latest throughput: {new_entry['throughput']} msg/s")
+            
+        except Exception as e:
+            print(f"ERROR in Python script: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
         EOF
         
         # Copy dashboard files if they exist
