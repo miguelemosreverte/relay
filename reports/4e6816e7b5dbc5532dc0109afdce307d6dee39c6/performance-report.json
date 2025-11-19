@@ -1,6 +1,6 @@
 {
   "results": {
-    "timestamp": "2025-11-19T06:07:45.907Z",
+    "timestamp": "2025-11-19T12:08:46.304Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
       "messages_per_second": 0,
@@ -10,6 +10,6 @@
       "latency_ms": 0,
       "connected_users": 2
     },
-    "error": "certificate is not yet valid"
+    "error": "self-signed certificate"
   }
 }
