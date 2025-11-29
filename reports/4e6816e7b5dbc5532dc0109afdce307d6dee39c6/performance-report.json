@@ -1,6 +1,6 @@
 {
   "results": {
-    "timestamp": "2025-11-28T18:06:53.750Z",
+    "timestamp": "2025-11-29T00:20:26.577Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
       "messages_per_second": 0,
@@ -10,6 +10,6 @@
       "latency_ms": 0,
       "connected_users": 2
     },
-    "error": "connect ECONNREFUSED 95.217.238.72:443"
+    "error": "self-signed certificate"
   }
 }
