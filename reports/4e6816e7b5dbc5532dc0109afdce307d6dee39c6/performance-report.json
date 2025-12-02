@@ -1,6 +1,6 @@
 {
   "results": {
-    "timestamp": "2025-12-01T18:07:32.700Z",
+    "timestamp": "2025-12-02T00:21:41.504Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
       "messages_per_second": 0,
@@ -10,6 +10,6 @@
       "latency_ms": 0,
       "connected_users": 2
     },
-    "error": "self-signed certificate"
+    "error": "read ECONNRESET"
   }
 }
