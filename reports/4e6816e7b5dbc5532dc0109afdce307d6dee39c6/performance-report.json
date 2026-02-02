@@ -1,6 +1,6 @@
 {
   "results": {
-    "timestamp": "2026-02-02T06:26:32.974Z",
+    "timestamp": "2026-02-02T12:14:07.595Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
       "messages_per_second": 0,
@@ -10,6 +10,6 @@
       "latency_ms": 0,
       "connected_users": 2
     },
-    "error": "connect ETIMEDOUT 95.217.238.72:443"
+    "error": "read ECONNRESET"
   }
 }
