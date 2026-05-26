@@ -1,6 +1,6 @@
 {
   "results": {
-    "timestamp": "2026-05-26T13:03:57.960Z",
+    "timestamp": "2026-05-26T18:50:50.978Z",
     "commit": "4e6816e7b5dbc5532dc0109afdce307d6dee39c6",
     "metrics": {
       "messages_per_second": 0,
@@ -10,6 +10,6 @@
       "latency_ms": 0,
       "connected_users": 2
     },
-    "error": "write EPROTO 409CAAF7147F0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:../deps/openssl/openssl/ssl/record/ssl3_record.c:355:\n"
+    "error": "write EPROTO 401C2ECA057F0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:../deps/openssl/openssl/ssl/record/ssl3_record.c:355:\n"
   }
 }
